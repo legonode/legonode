@@ -1,0 +1,41 @@
+---
+icon: SquareTerminal
+title: CLI
+description: "Legonode command line interface: dev, build, and start."
+---
+
+# CLI
+
+Legonode provides three main commands:
+
+## `legonode dev`
+
+Runs your app with hot reload. It watches:
+
+- route files (`route.*` or `get/post/put/...*.route.*`)
+- `middleware.*`
+- cron files (`*.cron.*`) under `cron/`
+- event files (`*.event.*`) under `events/`
+
+## `legonode build`
+
+Compiles TypeScript sources into the build output directory (default `./dist`).
+
+## `legonode start`
+
+Starts the built app (no hot reload).
+
+## Common options
+
+- `-p, --port <number>`: server port (default from config or `3000`)
+- `-H, --host <string>`: server host (default `127.0.0.1`)
+- `--appDir <path>`: app directory root (overrides `legonode.config.ts`)
+- `--build-path <path>`: output dir for `build` / `start` (default `./dist`)
+
+## Plugin command hooks
+
+If you configure `plugins` in `legonode.config.ts`, plugins can also react to CLI lifecycle via hooks like:
+
+- `onDevStart`, `onDevFileChange`, `onDevRestart`, `onDevStop`
+- `onBuildStart`, `onBuildComplete`, `onBuildError`
+- `onStartStart`, `onStartListening`, `onStartStop`, `onStartError`

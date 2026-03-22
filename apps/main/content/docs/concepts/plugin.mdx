@@ -1,0 +1,73 @@
+---
+icon: Plug
+title: Plugin
+description: Legonode plugin hooks for request lifecycle, middleware resolution, events, cron, and CLI lifecycle.
+---
+
+# Plugin
+
+Plugins let you run code at specific points in Legonode's lifecycle.
+
+## Configure plugins
+
+In `legonode.config.ts`:
+
+```ts title="legonode.config.ts"
+import type { LegonodePlugin } from "legonode";
+
+const plugin: LegonodePlugin = {
+  name: "my-plugin",
+  onRequest(ctx) {
+    ctx.logger.info("request entered");
+  },
+  onError(ctx, err) {
+    ctx.logger.error({ err }, "request failed");
+  },
+};
+
+export default {
+  plugins: [plugin],
+};
+```
+
+Plugins are executed in the order they appear in `plugins: []`.
+
+## Request lifecycle hooks
+- `onRequest(ctx)` — after request context + body parsing, before route resolution
+- `onRouteMatch(ctx)` — after a route is resolved and `ctx.params` is set
+- `beforeHandler(ctx)` — right before the route handler (or pipeline) runs
+- `afterHandler(ctx, result)` — after the handler returns
+- `beforeResponse(ctx)` — runs right before Legonode serializes/sends the response (only if the response hasn’t been sent yet)
+- `afterResponse(ctx)` — runs in Legonode’s `finally` block after the response path (success or error)
+- `onError(ctx, error)` — when an error is thrown/handled
+
+## Middleware hook
+
+If you need to observe which middleware will run:
+
+- `onMiddlewareResolved(ctx, { pathname, method, count })`
+
+This runs after Legonode resolves middleware for a matched route.
+
+## Event and cron hooks
+
+- `onEventEmit(ctx, { name, payload })`
+  - fires when `ctx.emit(name, payload)` is called
+  - `ctx.trace.traceId` is available for correlation (if emitted from a request)
+- `onCronRun(ctxOrUndefined, { name, payload, source })`
+  - `source: "manual"` when triggered from a route via `ctx.schedule(...)`
+  - `source: "scheduler"` when triggered by the cron scheduler
+- `onCronError(ctxOrUndefined, { name, payload, source, error })`
+
+## CLI lifecycle hooks
+
+Plugins can also react to command execution:
+
+- Dev: `onDevStart`, `onDevFileChange`, `onDevRestart`, `onDevStop`
+- Build: `onBuildStart`, `onBuildComplete`, `onBuildError`
+- Start: `onStartStart`, `onStartListening`, `onStartStop`, `onStartError`
+
+### Hook ordering
+
+If you have multiple plugins configured, Legonode runs each hook in the same order as the plugins appear in `legonode.config.ts` (`plugins: [...]`).
+

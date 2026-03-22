@@ -1,0 +1,100 @@
+---
+icon: BookOpenText
+title: Introduction
+description: What Legonode is, why it exists, and how to get started.
+---
+
+# Introduction to Legonode
+
+**Legonode** is a backend API framework for building fast, type-safe HTTP services. It gives you file-based routing, a middleware pipeline, validation with Zod, and a CLI so you can go from zero to a running API in minutes.
+
+This documentation covers what Legonode is, why it exists, and how to use it.
+
+---
+
+## What is Legonode?
+
+Legonode is a **Node.js and Bun-ready API framework** that focuses on:
+
+- **File-based routing** — Define routes by placing files in your app directory; no manual router setup.
+- **Type-safe request/response** — Validate bodies and responses with Zod and get full TypeScript inference.
+- **Middleware pipeline** — Compose CORS, logging, and custom logic in a clear order.
+- **CLI-first workflow** — Use `legonode dev`, `legonode build`, and `legonode start` for development and production.
+
+You write your handlers and middleware in TypeScript; Legonode handles routing, validation, body parsing, and server lifecycle. It runs on both **Node.js** (with tsx for `.ts` route files) and **Bun** natively.
+
+---
+
+## Why Legonode?
+
+- **Ship faster** — Minimal config, conventional project layout, and a single CLI. No framework lock-in for your HTTP layer; it's just a server and a router.
+- **Type safety** — Request/response schemas with Zod mean fewer runtime bugs and better editor support.
+- **Flexible runtime** — Use Node or Bun. Legonode stays close to the platform instead of hiding it.
+- **Observability** — Built-in request logging (Pino), tracing, and structured logging so you can debug and monitor without extra setup.
+- **Extensible** — Plugins, an event bus, and scheduled tasks let you add cross-cutting behavior without cluttering route handlers.
+
+Whether you're building a small API or a larger service, Legonode gives you structure without forcing a specific architecture.
+
+---
+
+## What does Legonode provide?
+
+| Area | What you get |
+|------|----------------|
+| **CLI** | `legonode dev` (hot reload), `legonode build`, `legonode start` — port, host, and app directory options |
+| **Routing** | File-based route loading, radix-tree matching, and a clear route table |
+| **Middleware** | Resolve, load, and run middleware in order; CORS and custom middleware supported |
+| **Validation** | Zod-based body and response validation with typed context and error handling |
+| **Body** | Parsing for JSON and other payloads |
+| **CORS** | Configurable CORS headers and preflight handling |
+| **Plugins** | A plugin API to extend the runtime and lifecycle |
+| **Events** | An event bus and file-based event handlers for decoupled logic |
+| **Schedules** | Cron-like scheduled tasks loaded from your app |
+| **Tracing** | Trace spans and a trace store for request flow and performance |
+| **Logging** | Pino-based request logging and a configurable base logger |
+
+---
+
+## Who is Legonode for?
+
+Legonode is for developers who want:
+
+- A **lightweight API framework** that doesn't dictate your whole stack.
+- **TypeScript-first** APIs with validation and good DX.
+- **Conventions** (file-based routes, standard CLI) without magic.
+- The option to run on **Node or Bun** with minimal changes.
+
+It fits greenfield APIs, internal tools, and services where you care about clarity and control over the HTTP layer.
+
+---
+
+## How do I get started?
+
+1. **Create a project** (or use the example): depend on the `legonode` package and set up an `appDir` (default `./src`) with a `router/` folder for routes and middleware (`appDir/router/**`).
+2. **Run the dev server:** `legonode dev` (default port 3000, configurable with `-p` and `-H`).
+3. **Add routes** as files under your `appDir/router/`; Legonode will load and serve them.
+4. **Build for production:** `legonode build`, then run with `legonode start`.
+
+The rest of this documentation goes into setup, routing, validation, middleware, and advanced topics.
+
+---
+
+## What you'll find in these docs
+
+- **Get started** — Set up your environment and run a Legonode project.
+- **Concepts** — Routing, middleware, validation, and the request lifecycle.
+- **Reference** — CLI options, config, and APIs.
+- **Examples** — Patterns and best practices.
+
+Use the sidebar to jump to a section, or search (⌘K) to find a topic.
+
+## Quick links
+
+<Cards>
+  <Card title="Home" href="/" description="Back to the homepage" />
+  <Card title="Get Started" href="/docs/get-started" description="Set up Legonode and run your first API" />
+</Cards>
+
+## Need help?
+
+If something is unclear or you run into issues, check the relevant section in the sidebar or open an issue in the project repository.
