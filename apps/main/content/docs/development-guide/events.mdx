@@ -40,7 +40,7 @@ Each event file must export a **default function** that will be registered as th
 
 1. **`payload`** — The value you passed to `ctx.emit(name, payload)` (or `emit(name, payload)`).
 2. **`ctx`** — An **`EventContext`** with:
-   - **`traceId`** — The request trace id when the event was emitted from a route; empty when emitted outside a request (e.g. from a cron).
+   - **`traceId`** — The request trace id when the event was emitted from a route; empty when emitted outside a request.
    - **`logger`** — Logger with `eventName` in bindings so logs from the handler correlate with the event (and request, when applicable).
    - **`eventName`** — The event name (e.g. `"user.created.email"`).
 
@@ -71,7 +71,7 @@ export default async function POST(ctx: Context) {
 
 - **`ctx.emit("user.created.email", user)`** — Invokes every handler registered for `user.created.email` (e.g. from `appDir/events/userCreatedEmail.event.ts`). The handler receives `user` as `payload` and an `EventContext` with the request's `traceId` and a logger.
 
-You can also get the event bus from the runtime and call `emit` outside a request (e.g. from a cron job); in that case `traceId` will be empty and the logger will still include `eventName`.
+You can also get the event bus from the runtime and call `emit` outside a request; in that case `traceId` will be empty and the logger will still include `eventName`.
 
 ---
 
@@ -138,4 +138,4 @@ Name your files so the resulting event name matches what you emit. For example, 
 | **Emit** | From routes: `ctx.emit("event.name", payload)`. Context gets request `traceId` and logger. |
 | **EventContext** | `traceId`, `logger`, `eventName`. |
 
-For emitting from routes, see [Routes](/docs/development-guide/routes). For triggering logic on a schedule, see [Cron jobs](/docs/development-guide/cron).
+For emitting from routes, see [Routes](/docs/development-guide/routes). For scheduled logic, see [Cron Plugin](/docs/plugins/cron).

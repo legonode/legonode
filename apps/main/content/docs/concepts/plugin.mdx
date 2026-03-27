@@ -1,7 +1,7 @@
 ---
 icon: Plug
 title: Plugin
-description: Legonode plugin hooks for request lifecycle, middleware resolution, events, cron, and CLI lifecycle.
+description: Legonode plugin hooks for request lifecycle, middleware resolution, events, and CLI lifecycle.
 ---
 
 # Plugin
@@ -49,15 +49,11 @@ If you need to observe which middleware will run:
 
 This runs after Legonode resolves middleware for a matched route.
 
-## Event and cron hooks
+## Event hooks
 
 - `onEventEmit(ctx, { name, payload })`
   - fires when `ctx.emit(name, payload)` is called
   - `ctx.trace.traceId` is available for correlation (if emitted from a request)
-- `onCronRun(ctxOrUndefined, { name, payload, source })`
-  - `source: "manual"` when triggered from a route via `ctx.schedule(...)`
-  - `source: "scheduler"` when triggered by the cron scheduler
-- `onCronError(ctxOrUndefined, { name, payload, source, error })`
 
 ## CLI lifecycle hooks
 

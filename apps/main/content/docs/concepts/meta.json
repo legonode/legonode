@@ -1,5 +1,5 @@
 {
   "title": "Concepts",
-  "pages": ["plugin", "cli", "tracing", "request", "response", "state", "params", "query", "body", "schema"]
+  "pages": ["plugin", "cli", "tracing", "state", "schema", "request", "response", "params", "query", "body"]
 }
 
