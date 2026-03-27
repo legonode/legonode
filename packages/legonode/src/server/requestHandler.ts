@@ -3,14 +3,22 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { createRuntime } from "../core/runtime.js";
 import type { Runtime } from "../core/runtime.js";
-import type { Response } from "../core/context.js";
+import type { LegonodeContext, Response } from "../core/context.js";
 import { getDefaultStatusFromSchema, releaseContext } from "../core/context.js";
 import type { CorsConfig, ErrorHandler } from "../config/loadConfig.js";
-import type { LegonodePlugin } from "../plugin/pluginAPI.js";
+import type {
+  LegonodeInitContext,
+  LegonodePlugin,
+  InitRouteEntry,
+} from "../plugin/pluginAPI.js";
 import { parseBody } from "../body/parseBody.js";
-import { getCorsHeaders, shouldRejectCorsRequest } from "../cors/cors.js";
-import { getOrCreateEventBus } from "../events/eventExecutor.js";
-import { getOrCreateScheduleRunner } from "../schedules/scheduleLoader.js";
+import {
+  applyCompiledCorsHeaders,
+  compileCors,
+  shouldRejectCompiledCorsRequest,
+  type CompiledCors,
+} from "../cors/cors.js";
+import { getOrCreateEventBus, scanEventFiles } from "../events/eventExecutor.js";
 import {
   getOrCreateMiddlewareResolver,
   preloadMiddleware,
@@ -26,6 +34,8 @@ import {
   preloadRoutes,
   type ResolvedRoute,
 } from "../router/router.js";
+import { getMethodsExportedByRouteFile } from "../router/routeLoader.js";
+import { scanMiddlewareFiles } from "../loader/fileScanner.js";
 import { getRouteTable } from "../router/routeTable.js";
 import { getStringifier } from "../json/fastStringify.js";
 import type { ResponseSchemaMap } from "../validation/routeSchema.js";
@@ -38,16 +48,22 @@ import {
 } from "../logger/requestLogger.js";
 import type { TraceData, TraceStartData } from "../trace/traceEngine.js";
 import type { TracerFn, TraceStartFn } from "../trace/traceEngine.js";
+import { shouldIgnoreTracingPathname } from "../trace/tracingIgnore.js";
 import { appLogger } from "../utils/logger.js";
 import { defaultErrorHandler } from "./errorHandler.js";
-
-const runtimeCache = new Map<string, Runtime | Promise<Runtime>>();
+import { cache, type TurboPlan } from "../cache/cache.js";
+import { applySecurityGuards } from "../security/middleware.js";
+import { compileSecurity } from "../security/compileSecurity.js";
+import { resolveRouteSecurityConfig } from "../security/securityConfigLoader.js";
 
 export function clearRuntimeCache(appDir?: string): void {
   if (appDir !== undefined) {
-    runtimeCache.delete(resolve(appDir));
+    const resolvedAppDir = resolve(appDir);
+    cache.removeFromCache("runtimeCache", resolvedAppDir);
+    clearTurboPlanCache(resolvedAppDir);
   } else {
-    runtimeCache.clear();
+    cache.clearCache("runtimeCache");
+    clearTurboPlanCache();
   }
 }
 
@@ -62,10 +78,23 @@ export async function warmRuntime(
 function getOrCreateRuntime(
   options: RequestHandlerOptions,
 ): Runtime | Promise<Runtime> {
+  const cachedByOptions = cache.getFromCache("runtimeByOptions", options) as
+    | Runtime
+    | Promise<Runtime>
+    | undefined;
+  if (cachedByOptions !== undefined) {
+    if (typeof (cachedByOptions as Promise<Runtime>).then === "function")
+      return cachedByOptions as Promise<Runtime>;
+    return cachedByOptions as Runtime;
+  }
   const appDir = options.appDir ?? "./src";
   const key = resolve(appDir);
-  const cached = runtimeCache.get(key);
+  const cached = cache.getFromCache("runtimeCache", key) as
+    | Runtime
+    | Promise<Runtime>
+    | undefined;
   if (cached !== undefined) {
+    cache.setInCache("runtimeByOptions", options, cached);
     if (typeof (cached as Promise<Runtime>).then === "function")
       return cached as Promise<Runtime>;
     return cached as Runtime;
@@ -76,30 +105,36 @@ function getOrCreateRuntime(
     } else if (options.dev?.logPretty) {
       setBaseLogger(createPrettyLogger());
     }
-    const [eventBus, scheduleRunner] = await Promise.all([
-      getOrCreateEventBus(appDir),
-      getOrCreateScheduleRunner(appDir),
-    ]);
+    const eventBus = await getOrCreateEventBus(appDir);
+    const ignore = options.tracingIgnorePathPrefixes;
     const tracer: TracerFn = options.tracer
       ? (data) => {
+          if (shouldIgnoreTracingPathname(data.pathname, ignore)) return;
           defaultTracer(data);
           options.tracer!(data);
         }
-      : defaultTracer;
+      : (data) => {
+          if (shouldIgnoreTracingPathname(data.pathname, ignore)) return;
+          defaultTracer(data);
+        };
     const traceStart: TraceStartFn = options.traceStart
       ? (data) => {
+          if (shouldIgnoreTracingPathname(data.pathname, ignore)) return;
           defaultTraceStart(data);
           options.traceStart!(data);
         }
-      : defaultTraceStart;
+      : (data) => {
+          if (shouldIgnoreTracingPathname(data.pathname, ignore)) return;
+          defaultTraceStart(data);
+        };
     const runtime = createRuntime({
       appDir: options.appDir,
       plugins: options.plugins ?? [],
       eventBus,
-      scheduleRunner,
       tracer,
       traceStart,
       tracing: options.tracing !== false,
+      ...(ignore !== undefined && { tracingIgnorePathPrefixes: ignore }),
       ...(options.contextPool !== undefined && {
         contextPool: options.contextPool,
       }),
@@ -147,10 +182,53 @@ function getOrCreateRuntime(
       });
     }
     preloadPipelines(appDir, pipelineEntries);
-    runtimeCache.set(key, runtime);
+    const plugins = options.plugins ?? [];
+    if (plugins.length > 0) {
+      const initRoutes: InitRouteEntry[] = [];
+      const seenRoutePair = new Set<string>();
+      for (const r of table) {
+        const methods =
+          r.method && r.method.length > 0
+            ? [r.method]
+            : await getMethodsExportedByRouteFile(r.filePath);
+        for (const method of methods) {
+          if (!method || method.length === 0) continue;
+          const dedupeKey = `${method}\0${r.pathname}\0${r.filePath}`;
+          if (seenRoutePair.has(dedupeKey)) continue;
+          seenRoutePair.add(dedupeKey);
+          const routeResult = resolveRoute(method, r.pathname, appDir);
+          const route: ResolvedRoute | null =
+            routeResult != null &&
+            typeof (routeResult as Promise<unknown>).then === "function"
+              ? await routeResult
+              : (routeResult as ResolvedRoute | null);
+          if (!route) continue;
+          const lr = route.route;
+          const entry: InitRouteEntry = {
+            pathname: r.pathname,
+            filePath: r.filePath,
+            method,
+          };
+          if (lr.schema != null) entry.schema = lr.schema;
+          if (lr.methodSchema != null) entry.methodSchema = lr.methodSchema;
+          if (lr.responseSchema != null) entry.responseSchema = lr.responseSchema;
+          initRoutes.push(entry);
+        }
+      }
+      const manifest: LegonodeInitContext = {
+        appDir: key,
+        routes: initRoutes,
+        events: scanEventFiles(appDir),
+        middlewares: scanMiddlewareFiles(appDir),
+      };
+      await runtime.runHook("init", manifest);
+    }
+    cache.setInCache("runtimeCache", key, runtime);
+    cache.setInCache("runtimeByOptions", options, runtime);
     return runtime;
   })();
-  runtimeCache.set(key, promise);
+  cache.setInCache("runtimeCache", key, promise);
+  cache.setInCache("runtimeByOptions", options, promise);
   return promise;
 }
 
@@ -165,7 +243,7 @@ export type RequestHandlerOptions = {
   /** Base logger for ctx.logger (request-scoped children will include traceId). */
   logger?: LegonodeLogger;
   /** Dev options from config (e.g. dev.logPretty for pino-pretty in development). */
-  dev?: { cron?: boolean; logPretty?: boolean };
+  dev?: { logPretty?: boolean };
   /** Override default API tracing (span end). */
   tracer?: TracerFn;
   /** Override default API tracing (span start). */
@@ -174,12 +252,37 @@ export type RequestHandlerOptions = {
   tracing?: boolean;
   /** Set true to reuse context objects from a pool (may help under heavy load with many routes). */
   contextPool?: boolean;
+  /**
+   * Skip default + custom tracing for pathnames matching these prefixes (see LegonodeConfig).
+   */
+  tracingIgnorePathPrefixes?: string[];
 };
+
+function getCompiledRequestOptions(
+  options: RequestHandlerOptions,
+): { cors: CompiledCors } {
+  const cached = cache.getFromCache("compiledOptionsCache", options) as
+    | { cors: CompiledCors }
+    | undefined;
+  if (cached) return cached;
+  const compiled = {
+    cors: compileCors(options.cors),
+  };
+  cache.setInCache("compiledOptionsCache", options, compiled);
+  return compiled;
+}
 
 function defaultTraceStart(data: TraceStartData): void {
   getBaseLogger()
     .child({ traceId: data.traceId })
-    .info({ method: data.method, pathname: data.pathname }, "request started");
+    .info(
+      {
+        method: data.method,
+        pathname: data.pathname,
+        startTime: new Date(data.startTime).toISOString(),
+      },
+      "request started",
+    );
 }
 
 function defaultTracer(data: TraceData): void {
@@ -194,6 +297,8 @@ function defaultTracer(data: TraceData): void {
         ...(data.routeId != null && { routeId: data.routeId }),
         ...(data.responseSize != null && { responseSize: data.responseSize }),
         ...(data.error != null && { error: data.error }),
+        startTime: new Date(data.startTime).toISOString(),
+        endTime: new Date(data.endTime).toISOString(),
       },
       "request completed",
     );
@@ -219,6 +324,20 @@ const INTERNAL_ERROR_JSON = Buffer.from(
   '{"error":"Internal Server Error"}',
   "utf8",
 );
+export function clearTurboPlanCache(appDir?: string): void {
+  if (appDir === undefined) {
+    cache.clearCache("turboPlanCache");
+    return;
+  }
+  const prefix = resolve(appDir) + "\0";
+  for (const key of cache.getCache("turboPlanCache").keys()) {
+    if (key.startsWith(prefix)) cache.removeFromCache("turboPlanCache", key);
+  }
+}
+
+function turboCacheKey(appDir: string, method: string, pathname: string): string {
+  return `${resolve(appDir)}\0${method}\0${pathname}`;
+}
 
 function isHelloWorld(obj: unknown): boolean {
   return (
@@ -284,7 +403,18 @@ export async function handleNodeRequest(
   options: RequestHandlerOptions = {},
 ) {
   const appDir = options.appDir ?? "./src";
-  const method = (req.method ?? "GET").toUpperCase();
+  const compiledOptions = getCompiledRequestOptions(options);
+  const rawMethod = req.method ?? "GET";
+  const method =
+    rawMethod === "GET" ||
+    rawMethod === "POST" ||
+    rawMethod === "PUT" ||
+    rawMethod === "PATCH" ||
+    rawMethod === "DELETE" ||
+    rawMethod === "HEAD" ||
+    rawMethod === "OPTIONS"
+      ? rawMethod
+      : rawMethod.toUpperCase();
   const rawUrl = req.url ?? "/";
   const q = rawUrl.indexOf("?");
   const pathnameRaw = q === -1 ? rawUrl : rawUrl.slice(0, q);
@@ -297,12 +427,19 @@ export async function handleNodeRequest(
     typeof (runtimeOrPromise as Promise<Runtime>).then === "function"
       ? ((await runtimeOrPromise) as Runtime)
       : (runtimeOrPromise as Runtime);
+  const tracingEnabled = runtime.tracing === true;
   const ctx = runtime.createRequestContext(req, res);
+
+  const routeSecurity = await resolveRouteSecurityConfig(appDir, pathname, method);
+  const effectiveSecurity = compileSecurity(routeSecurity);
+  if (!applySecurityGuards(effectiveSecurity, ctx, method)) return;
 
   if (method === "GET" || method === "HEAD") {
     ctx.body = null;
   } else {
-    const maxBodySize = options.maxBodySize ?? 1_000_000;
+    const maxBodySize = effectiveSecurity.requestSize.enabled
+      ? effectiveSecurity.requestSize.maxBodySize
+      : (options.maxBodySize ?? 1_000_000);
     const parseResult = await parseBody(req, maxBodySize);
     if (!parseResult.ok) {
       res.statusCode = parseResult.status;
@@ -315,85 +452,117 @@ export async function handleNodeRequest(
 
   if (runtime.hasPlugins) await runtime.runHook("onRequest", ctx);
 
-  const corsConfig = options.cors ?? {};
-  if (shouldRejectCorsRequest(corsConfig, req)) {
-    const rawOrigin = req.headers.origin;
-    const requestOrigin =
-      typeof rawOrigin === "string"
-        ? rawOrigin
-        : Array.isArray(rawOrigin)
-          ? (rawOrigin[0] ?? "unknown")
-          : "unknown";
-    res.statusCode = 403;
-    res.setHeader("content-type", "application/json; charset=utf-8");
-    res.end(
-      JSON.stringify({
-        error: `CORS policy violation: origin "${requestOrigin}" is not allowed.`,
-        code: "CORS_ORIGIN_NOT_ALLOWED",
-        hint: "Add this origin to `cors.origin`",
-      }),
-    );
-    return;
-  }
-  const corsHeaders = getCorsHeaders(corsConfig, req);
-  for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
-  if (method === "OPTIONS") {
-    res.statusCode = 204;
-    res.end();
-    return;
+  if (compiledOptions.cors.enabled) {
+    if (shouldRejectCompiledCorsRequest(compiledOptions.cors, req)) {
+      const rawOrigin = req.headers.origin;
+      const requestOrigin =
+        typeof rawOrigin === "string"
+          ? rawOrigin
+          : Array.isArray(rawOrigin)
+            ? (rawOrigin[0] ?? "unknown")
+            : "unknown";
+      res.statusCode = 403;
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(
+        JSON.stringify({
+          error: `CORS policy violation: origin "${requestOrigin}" is not allowed.`,
+          code: "CORS_ORIGIN_NOT_ALLOWED",
+          hint: "Add this origin to `cors.origin`",
+        }),
+      );
+      return;
+    }
+    const corsHeaders = applyCompiledCorsHeaders(compiledOptions.cors, req);
+    for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
+    if (method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
   }
 
   ctx.__traceSpan?.start({ method, pathname });
 
-  const routeResult = resolveRoute(method, pathname, appDir);
-  const route = (
-    routeResult != null &&
-    typeof (routeResult as Promise<unknown>).then === "function"
-      ? await routeResult
-      : routeResult
-  ) as ResolvedRoute | null;
-  const matchedRouteId: string | null =
-    route != null
-      ? (route.route?.routeId ??
-        (route as { routeId?: string }).routeId ??
-        null)
-      : null;
-  let pathnameForMiddleware: string;
-  let middleware: Middleware[];
-  if (route) {
-    ctx.params = route.params;
-    const loaded = route.route;
-    const mergedResponseSchema = loaded.responseSchema
-      ? { ...(options.responses ?? {}), ...loaded.responseSchema }
-      : options.responses;
-    if (ctx.__responseSchemaRef && mergedResponseSchema !== undefined)
-      ctx.__responseSchemaRef.current = mergedResponseSchema;
-    if (ctx.__defaultStatusRef && mergedResponseSchema !== undefined)
-      ctx.__defaultStatusRef.current =
-        getDefaultStatusFromSchema(mergedResponseSchema);
-    if (runtime.hasPlugins) await runtime.runHook("onRouteMatch", ctx);
-    pathnameForMiddleware = route.middlewarePath;
-    const middlewareResolver = getOrCreateMiddlewareResolver(appDir);
-    const middlewareResult = middlewareResolver.resolveForPathname(
-      pathnameForMiddleware,
-      method,
-    );
-    middleware = (
-      middlewareResult != null &&
-      typeof (middlewareResult as Promise<unknown>).then === "function"
-        ? await middlewareResult
-        : middlewareResult
-    ) as Middleware[];
-    if (runtime.hasPlugins) {
-      await runtime.runHook("onMiddlewareResolved", ctx, {
-        pathname: pathnameForMiddleware,
+  let matchedRouteId: string | null = null;
+  let pathnameForMiddleware = pathname;
+  let middleware: Middleware[] = [];
+  let route: ResolvedRoute | null = null;
+  let pipeline: ((ctx: LegonodeContext) => unknown | Promise<unknown>) | null = null;
+
+  const turboKey = turboCacheKey(appDir, method, pathname);
+  const cachedPlan = cache.getFromCache("turboPlanCache", turboKey) as TurboPlan | undefined;
+  if (cachedPlan) {
+    matchedRouteId = cachedPlan.routeId;
+    pathnameForMiddleware = cachedPlan.middlewarePath;
+    middleware = cachedPlan.middleware;
+    pipeline = cachedPlan.pipeline;
+    if (ctx.__responseSchemaRef && cachedPlan.mergedResponseSchema !== undefined)
+      ctx.__responseSchemaRef.current = cachedPlan.mergedResponseSchema;
+    if (ctx.__defaultStatusRef) ctx.__defaultStatusRef.current = cachedPlan.defaultStatus;
+  }
+
+  if (!pipeline) {
+    const routeResult = resolveRoute(method, pathname, appDir);
+    route = (
+      routeResult != null &&
+      typeof (routeResult as Promise<unknown>).then === "function"
+        ? await routeResult
+        : routeResult
+    ) as ResolvedRoute | null;
+    matchedRouteId =
+      route != null
+        ? (route.route?.routeId ??
+          (route as { routeId?: string }).routeId ??
+          null)
+        : null;
+
+    if (route) {
+      ctx.params = route.params;
+      const loaded = route.route;
+      const mergedResponseSchema = loaded.responseSchema
+        ? { ...(options.responses ?? {}), ...loaded.responseSchema }
+        : options.responses;
+      const defaultStatus = mergedResponseSchema !== undefined ? getDefaultStatusFromSchema(mergedResponseSchema) : 200;
+      if (ctx.__responseSchemaRef && mergedResponseSchema !== undefined)
+        ctx.__responseSchemaRef.current = mergedResponseSchema;
+      if (ctx.__defaultStatusRef) ctx.__defaultStatusRef.current = defaultStatus;
+      if (runtime.hasPlugins) await runtime.runHook("onRouteMatch", ctx);
+      pathnameForMiddleware = route.middlewarePath;
+      const middlewareResolver = getOrCreateMiddlewareResolver(appDir);
+      const middlewareResult = middlewareResolver.resolveForPathname(
+        pathnameForMiddleware,
         method,
-        count: middleware.length,
+      );
+      middleware = (
+        middlewareResult != null &&
+        typeof (middlewareResult as Promise<unknown>).then === "function"
+          ? await middlewareResult
+          : middlewareResult
+      ) as Middleware[];
+      if (runtime.hasPlugins) {
+        await runtime.runHook("onMiddlewareResolved", ctx, {
+          pathname: pathnameForMiddleware,
+          method,
+          count: middleware.length,
+        });
+      }
+      pipeline = getOrCreatePipeline(
+        appDir,
+        pathnameForMiddleware,
+        method,
+        route.route,
+        middleware,
+      );
+      cache.setInCache("turboPlanCache", turboKey, {
+        middlewarePath: pathnameForMiddleware,
+        route: route.route,
+        middleware,
+        mergedResponseSchema,
+        defaultStatus,
+        pipeline,
+        routeId: matchedRouteId,
       });
     }
-  } else {
-    pathnameForMiddleware = pathname;
-    middleware = [];
   }
 
   let requestError: unknown;
@@ -401,14 +570,7 @@ export async function handleNodeRequest(
     let handlerResult: unknown;
 
     if (runtime.hasPlugins) await runtime.runHook("beforeHandler", ctx);
-    if (route) {
-      const pipeline = getOrCreatePipeline(
-        appDir,
-        pathnameForMiddleware,
-        method,
-        route.route,
-        middleware,
-      );
+    if (pipeline) {
       const raw = pipeline(ctx);
       handlerResult =
         raw != null && typeof (raw as Promise<unknown>).then === "function"
@@ -437,9 +599,9 @@ export async function handleNodeRequest(
         let preSerializedJson: string | undefined;
         if ("json" in response) {
           if (statusCode === 200 && isHelloWorld(response.json)) {
-            if (ctx.__responseSizeRef)
+            if (tracingEnabled && ctx.__responseSizeRef)
               ctx.__responseSizeRef.current = HELLO_WORLD_JSON.length;
-          } else {
+          } else if (tracingEnabled) {
             const stringifier = getStringifier(
               mergedResponseSchema,
               statusCode,
@@ -457,7 +619,7 @@ export async function handleNodeRequest(
               ctx.__responseSizeRef.current =
                 Buffer.byteLength(preSerializedJson);
           }
-        } else if (ctx.__responseSizeRef && "body" in response) {
+        } else if (tracingEnabled && ctx.__responseSizeRef && "body" in response) {
           const b = (response as { body?: string | Uint8Array }).body;
           ctx.__responseSizeRef.current =
             b === undefined
@@ -525,7 +687,7 @@ export async function handleNodeRequest(
     }
   } finally {
     const span = ctx.__traceSpan;
-    if (span) {
+    if (tracingEnabled && span) {
       span.annotate("statusCode", res.statusCode);
       span.annotate("routeId", matchedRouteId);
       span.annotate("responseSize", ctx.__responseSizeRef?.current ?? 0);

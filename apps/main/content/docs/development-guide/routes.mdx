@@ -325,7 +325,6 @@ The handler receives a single argument: **`ctx`** (the request context). It cont
 | **`ctx.user`** | Set by auth middleware (e.g. after verifying a token). |
 | **`ctx.state`** | Mutable object for passing data between middleware and the handler. |
 | **`ctx.emit`** | Emit events: `ctx.emit('event.name', payload)`. |
-| **`ctx.schedule`** | Run a scheduled task by name: `ctx.schedule('interval.example', payload)`. |
 | **`ctx.logger`** | Request-scoped logger (includes trace id). |
 | **`ctx.trace`** | `{ traceId }` for request correlation. |
 

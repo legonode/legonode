@@ -13,7 +13,11 @@ export type {
 export type { Next, Middleware } from "./middleware/middlewareRunner.js";
 export { NextError } from "./middleware/middlewareRunner.js";
 export type { CorsConfig, ErrorHandler, LegonodeConfig } from "./config/loadConfig.js";
-export type { LegonodePlugin } from "./plugin/pluginAPI.js";
+export type {
+  LegonodePlugin,
+  LegonodeInitContext,
+  InitRouteEntry
+} from "./plugin/pluginAPI.js";
 export { createContext } from "./core/context.js";
 export { handleNodeRequest, warmRuntime } from "./server/requestHandler.js";
 export { createNodeServer } from "./server/server.js";
@@ -24,22 +28,24 @@ export { getCorsHeaders } from "./cors/cors.js";
 export {
   getOrCreateEventBus,
   clearEventBusCache,
-  registerEventHandlersFromApp
+  registerEventHandlersFromApp,
+  scanEventFiles
 } from "./events/eventExecutor.js";
+export type { ScannedEvent } from "./events/eventExecutor.js";
 export type { EventContext, EventHandler, EventEmitterFn } from "./events/eventBus.js";
 export type { LegonodeLogger } from "./logger/requestLogger.js";
 export { getBaseLogger, setBaseLogger, createRequestLogger, createPrettyLogger, getNoopLogger } from "./logger/requestLogger.js";
 export type { TraceData, TraceStartData, TracerFn, TraceStartFn, TraceSpan } from "./trace/traceEngine.js";
 export { createTraceSpan } from "./trace/traceEngine.js";
-export type { ScheduleDef, Schedule, TaskContext, TaskRunFn, LoadedTask } from "./schedules/types.js";
-export type { ScheduleRunnerFn } from "./schedules/scheduleLoader.js";
-export {
-  loadSchedulesFromApp,
-  scanScheduleFiles,
-  loadScheduleModule,
-  createScheduleRunner,
-  getOrCreateScheduleRunner,
-  clearScheduleRunnerCache
-} from "./schedules/scheduleLoader.js";
-export { runScheduler } from "./schedules/runScheduler.js";
-
+export { shouldIgnoreTracingPathname } from "./trace/tracingIgnore.js";
+export { compileSecurity } from "./security/index.js";
+export type {
+  SecurityConfig,
+  RateLimitConfig,
+  SecurityHeadersConfig,
+  RequestSizeConfig,
+  IpFilterConfig,
+  CsrfConfig,
+  TimeoutConfig,
+  CompiledSecurity,
+} from "./security/index.js";

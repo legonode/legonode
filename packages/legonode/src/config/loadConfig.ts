@@ -31,8 +31,6 @@ export type LegonodeConfig = {
   port?: number;
   /** Dev-only options. */
   dev?: {
-    /** Set false to disable cron jobs in development (default: true). */
-    cron?: boolean;
     /** Set true to use pino-pretty for human-readable logs in development. */
     logPretty?: boolean;
   };
@@ -50,6 +48,12 @@ export type LegonodeConfig = {
   tracer?: TracerFn;
   /** Called when a request span starts. Default logs "request started" via logger. */
   traceStart?: TraceStartFn;
+  /**
+   * Path prefixes for which request tracing is skipped: no default "request started" /
+   * "request completed" logs, no custom tracer/traceStart, and no ctx.log mirroring.
+   * Example: `["/legonode-devtools", "/.well-known"]` to silence devtools UI and Chrome probes.
+   */
+  tracingIgnorePathPrefixes?: string[];
 };
 
 export async function loadConfig(cwd: string): Promise<LegonodeConfig> {
@@ -79,7 +83,7 @@ export async function loadConfig(cwd: string): Promise<LegonodeConfig> {
 export function getAppDir(config: LegonodeConfig, cwd: string): string|undefined {
   // Default app directory layout:
   // - routes live under `${appDir}/router/**`
-  // - other runtime features (events/schedules/middleware/etc.) use `${appDir}`
+  // - other runtime features (events/middleware/etc.) use `${appDir}`
   try {
     const appDir = config.appDir ?? "./src";
     const routerDir = resolve(appDir);
@@ -108,10 +112,11 @@ export type RequestHandlerOptionsFromConfig = {
   plugins?: LegonodePlugin[];
   responses?: ResponseSchemaMap;
   logger?: LegonodeLogger;
-  dev?: { cron?: boolean; logPretty?: boolean };
+  dev?: { logPretty?: boolean };
   tracing?: boolean;
   tracer?: TracerFn;
   traceStart?: TraceStartFn;
+  tracingIgnorePathPrefixes?: string[];
 };
 
 export function getRequestHandlerOptionsFromConfig(
@@ -131,5 +136,7 @@ export function getRequestHandlerOptionsFromConfig(
   if (config.tracing !== undefined) out.tracing = config.tracing;
   if (config.tracer !== undefined) out.tracer = config.tracer;
   if (config.traceStart !== undefined) out.traceStart = config.traceStart;
+  if (config.tracingIgnorePathPrefixes !== undefined)
+    out.tracingIgnorePathPrefixes = config.tracingIgnorePathPrefixes;
   return out;
 }

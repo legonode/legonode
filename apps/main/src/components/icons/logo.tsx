@@ -1,19 +1,18 @@
-import { useTheme } from "next-themes";
-import React, { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
-const Logo = () => {
-  const { resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  const isDark = resolvedTheme === "dark";
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-  if (!mounted) {
-    return <div className="bg-muted size-10 animate-pulse rounded-full" />;
-  }
+const Logo = ({
+  iconOnly = false,
+  isLink = true,
+}: {
+  iconOnly?: boolean;
+  isLink?: boolean;
+}) => {
+  const pathname = usePathname();
+  const link = isLink ? "/" : pathname;
   return (
-    <div className="flex items-center gap-2">
+    <Link href={link} className="flex items-center gap-2">
       <Image
         src={"/logo.png"}
         alt="Logo"
@@ -21,11 +20,13 @@ const Logo = () => {
         height={100}
         className="size-8"
       />
-      <p className="flex items-center text-sm font-bold">
-        <span className="text-foreground">Lego</span>
-        <span className="text-primary">node</span>
-      </p>
-    </div>
+      {iconOnly ? null : (
+        <p className="flex items-center text-sm font-bold">
+          <span className="text-foreground">Lego</span>
+          <span className="text-primary">node</span>
+        </p>
+      )}
+    </Link>
   );
 };
 

@@ -62,15 +62,26 @@ function parseUrlEncoded(buf: Buffer): Record<string, string> {
   if (buf.length === 0) return {};
   const raw = buf.toString("utf-8");
   const out: Record<string, string> = {};
-  for (const pair of raw.split("&")) {
-    const eq = pair.indexOf("=");
-    if (eq === -1) {
-      out[decodeURIComponent(pair.replace(/\+/g, " "))] = "";
-    } else {
-      const key = decodeURIComponent(pair.slice(0, eq).replace(/\+/g, " "));
-      const value = decodeURIComponent(pair.slice(eq + 1).replace(/\+/g, " "));
-      out[key] = value;
-    }
+  let start = 0;
+  while (start < raw.length) {
+    const amp = raw.indexOf("&", start);
+    const end = amp === -1 ? raw.length : amp;
+    const eq = raw.indexOf("=", start);
+    const keyEnd = eq === -1 || eq > end ? end : eq;
+    const keyRaw = raw.slice(start, keyEnd);
+    const valueRaw = keyEnd === end ? "" : raw.slice(keyEnd + 1, end);
+    const key = keyRaw.includes("+")
+      ? decodeURIComponent(keyRaw.replaceAll("+", " "))
+      : keyRaw.includes("%")
+        ? decodeURIComponent(keyRaw)
+        : keyRaw;
+    const value = valueRaw.includes("+")
+      ? decodeURIComponent(valueRaw.replaceAll("+", " "))
+      : valueRaw.includes("%")
+        ? decodeURIComponent(valueRaw)
+        : valueRaw;
+    out[key] = value;
+    start = amp === -1 ? raw.length : amp + 1;
   }
   return out;
 }

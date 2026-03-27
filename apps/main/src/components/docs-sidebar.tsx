@@ -16,12 +16,35 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "./ui/collapsible";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, LucideIcon } from "lucide-react";
 
 export interface DocsSidebarProps {
   tree: Root;
   className?: string;
+}
+
+function isHrefActive(pathname: string, href: string): boolean {
+  return (
+    pathname === href ||
+    (href !== "/docs" && !/^\/docs\/v[^/]+$/.test(href) && pathname.startsWith(href + "/"))
+  );
+}
+
+function isItemActive(item: Item, pathname: string, currentVersion: string): boolean {
+  const href = buildDocsHref(item.url, currentVersion as DocVersionUrl);
+  return isHrefActive(pathname, href);
+}
+
+function isNodeActive(node: Node, pathname: string, currentVersion: string): boolean {
+  if (node.type === "page") return isItemActive(node, pathname, currentVersion);
+  if (node.type === "folder") return isFolderActive(node, pathname, currentVersion);
+  return false;
+}
+
+function isFolderActive(folder: Folder, pathname: string, currentVersion: string): boolean {
+  if (folder.index && isItemActive(folder.index, pathname, currentVersion)) return true;
+  return folder.children.some((child) => isNodeActive(child, pathname, currentVersion));
 }
 
 function SidebarItem({
@@ -73,7 +96,14 @@ function SidebarFolder({
   onLinkClick?: () => void;
   currentVersion: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const hasActiveChild = isFolderActive(folder, pathname, currentVersion);
+  const [open, setOpen] = useState(hasActiveChild);
+
+  useEffect(() => {
+    if (hasActiveChild) setOpen(true);
+  }, [hasActiveChild]);
+
   return (
     <Collapsible className="mt-2" open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="text-fd-muted-foreground flex w-full items-center justify-between">
@@ -192,7 +222,7 @@ export function DocsSidebar({ tree, className }: DocsSidebarProps) {
       >
         <aside
           id="nd-sidebar"
-          className="border-fd-border bg-fd-card absolute inset-y-0 inset-s-0 flex w-full flex-col overflow-y-auto border-e text-sm"
+          className="border-fd-border bg-fd-card absolute inset-y-0 inset-s-0 flex w-full flex-col overflow-y-auto border-e text-sm no-scrollbar"
         >
           <div className="flex min-h-0 flex-1 flex-col gap-2 p-4">
             <DocsVersionDropdown className="mb-2 w-full justify-between" />

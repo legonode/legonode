@@ -4,26 +4,52 @@ import { pathToFileURL } from "node:url";
 import { invalidateModuleCache } from "../loader/moduleCache.js";
 import { createEventBus } from "./eventBus.js";
 import type { EventBus, EventHandler } from "./eventBus.js";
-
-const eventBusCache = new Map<string, EventBus>();
+import { cache } from "../cache/cache.js";
 
 export async function getOrCreateEventBus(appDir: string): Promise<EventBus> {
   const key = resolve(appDir);
-  let bus = eventBusCache.get(key);
+  let bus = cache.getFromCache("eventBusCache", key) as EventBus | undefined;
   if (bus) return bus;
   bus = createEventBus();
   await registerEventHandlersFromApp(bus, appDir);
-  eventBusCache.set(key, bus);
+  cache.setInCache("eventBusCache", key, bus);
   return bus;
 }
 
 export function clearEventBusCache(appDir?: string): void {
-  if (appDir) eventBusCache.delete(resolve(appDir));
-  else eventBusCache.clear();
+  if (appDir) cache.removeFromCache("eventBusCache", resolve(appDir));
+  else cache.clearCache("eventBusCache");
 }
 
 const EVENT_EXTENSIONS = [".event.ts", ".event.js", ".event.mts", ".event.mjs"];
 const EVENTS_DIR = "events";
+
+export type ScannedEvent = { name: string; filePath: string };
+
+/** List event handler files under `appDir/events/` without loading modules. */
+export function scanEventFiles(appDir: string): ScannedEvent[] {
+  const eventsDir = resolve(appDir, EVENTS_DIR);
+  const list: ScannedEvent[] = [];
+  let entries: { name: string; isFile?: boolean }[];
+  try {
+    entries = readdirSync(eventsDir, { withFileTypes: true }).map((e) => ({
+      name: e.name,
+      isFile: e.isFile()
+    }));
+  } catch {
+    return list;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile) continue;
+    const ext = EVENT_EXTENSIONS.find((e) => entry.name.endsWith(e));
+    if (!ext) continue;
+    const baseName = entry.name.slice(0, -ext.length);
+    const eventName = eventNameFromFile(baseName);
+    if (!eventName) continue;
+    list.push({ name: eventName, filePath: join(eventsDir, entry.name) });
+  }
+  return list;
+}
 
 /** Convert filename (e.g. userCreated) to event name (e.g. user.created) */
 function eventNameFromFile(baseName: string): string {

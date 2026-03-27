@@ -6,8 +6,6 @@ import { appLogger } from "../src/utils/logger.js";
 import { runPluginHook } from "./pluginHooks.js";
 import { validateApp } from "../src/validation/validateApp.js";
 import { setupServer } from "../src/server/server.js";
-import { loadSchedulesFromApp } from "../src/schedules/scheduleLoader.js";
-import { runScheduler } from "../src/schedules/runScheduler.js";
 
 const runServer = async (opts: StartOptions={}) => {
     const host = opts.host ?? "127.0.0.1";
@@ -68,29 +66,6 @@ const runServer = async (opts: StartOptions={}) => {
       process.exit(1);
     }
 
-    const tasks = await loadSchedulesFromApp(appDir);
-    let stopScheduler: (() => void) | null = null;
-    if (tasks.length > 0) {
-      stopScheduler = runScheduler(tasks, {
-        onRun: async (name, taskCtx) => {
-          await runPluginHook(plugins, "onCronRun", undefined, {
-            name,
-            payload: taskCtx.payload,
-            source: "scheduler",
-          });
-        },
-        onError: (name, err) => {
-          void runPluginHook(plugins, "onCronError", undefined, {
-            name,
-            payload: undefined,
-            source: "scheduler",
-            error: err,
-          });
-          appLogger.error(`[legonode task ${name}]`, err);
-        }
-      });
-    }
-
     const onSignal = () => {
       void runPluginHook(plugins, "onStartStop", {
         command: "start",
@@ -101,7 +76,6 @@ const runServer = async (opts: StartOptions={}) => {
         buildPath,
         reason: "signal",
       });
-      stopScheduler?.();
       void app?.close().catch(() => {});
       process.exit(0);
     };

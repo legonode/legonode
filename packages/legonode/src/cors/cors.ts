@@ -14,13 +14,18 @@ function getRequestOrigin(req: IncomingMessage): string | null {
 function isOriginAllowed(config: CorsConfig, req: IncomingMessage): boolean {
   const origin = getRequestOrigin(req);
 
-  const cfg = config.origin||[];
+  /** Must not use `config.origin || []` — undefined would become [] and reject every Origin. */
+  const cfg = config.origin;
+
   if (!origin) {
     // Non-browser or same-origin requests usually don't send Origin.
     return true;
   }
   if (cfg === undefined || cfg === true) {
     return true;
+  }
+  if (cfg === false) {
+    return false;
   }
   if (typeof cfg === "string") {
     return cfg === origin;
@@ -84,4 +89,66 @@ export function getCorsHeaders(
   }
 
   return headers;
+}
+
+export type CompiledCors =
+  | { enabled: false }
+  | {
+      enabled: true;
+      origin: CorsConfig["origin"];
+      allowMethods: string;
+      allowHeaders: string;
+      credentials: boolean;
+    };
+
+export function compileCors(cors: CorsConfig | undefined): CompiledCors {
+  if (!cors || Object.keys(cors).length === 0) return { enabled: false };
+  const methods = cors.methods ?? DEFAULT_METHODS;
+  const allowedHeaders = cors.allowedHeaders ?? DEFAULT_HEADERS;
+  return {
+    enabled: true,
+    origin: cors.origin,
+    allowMethods: Array.isArray(methods) ? methods.join(", ") : methods,
+    allowHeaders: Array.isArray(allowedHeaders) ? allowedHeaders.join(", ") : allowedHeaders,
+    credentials: cors.credentials === true
+  };
+}
+
+function isCompiledOriginAllowed(originConfig: CorsConfig["origin"], requestOrigin: string | null): boolean {
+  if (!requestOrigin) return true;
+  if (originConfig === undefined || originConfig === true) return true;
+  if (originConfig === false) return false;
+  if (typeof originConfig === "string") return originConfig === requestOrigin;
+  if (Array.isArray(originConfig)) return originConfig.includes(requestOrigin);
+  return false;
+}
+
+function resolveCompiledOrigin(originConfig: CorsConfig["origin"], requestOrigin: string | null): string | null {
+  if (!isCompiledOriginAllowed(originConfig, requestOrigin)) return null;
+  if (originConfig === undefined || originConfig === true) return requestOrigin;
+  if (originConfig === false) return null;
+  if (typeof originConfig === "string") return originConfig;
+  if (Array.isArray(originConfig)) return requestOrigin;
+  return null;
+}
+
+export function applyCompiledCorsHeaders(compiled: CompiledCors, req: IncomingMessage): Record<string, string> {
+  if (!compiled.enabled) return {};
+  const requestOrigin = getRequestOrigin(req);
+  const allowOrigin = resolveCompiledOrigin(compiled.origin, requestOrigin);
+  if (!allowOrigin) return {};
+
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Methods": compiled.allowMethods,
+    "Access-Control-Allow-Headers": compiled.allowHeaders
+  };
+  if (compiled.credentials) headers["Access-Control-Allow-Credentials"] = "true";
+  return headers;
+}
+
+export function shouldRejectCompiledCorsRequest(compiled: CompiledCors, req: IncomingMessage): boolean {
+  if (!compiled.enabled) return false;
+  const requestOrigin = getRequestOrigin(req);
+  return !isCompiledOriginAllowed(compiled.origin, requestOrigin);
 }

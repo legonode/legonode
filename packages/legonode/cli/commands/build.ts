@@ -3,7 +3,6 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { loadConfig, getAppDir, getBuildPath } from "../../src/config/loadConfig.js";
 import { scanAppFiles } from "../../src/loader/fileScanner.js";
-import { scanScheduleFiles } from "../../src/schedules/scheduleLoader.js";
 import { validateApp } from "../../src/validation/validateApp.js";
 import { runPluginHook } from "../pluginHooks.js";
 import { appLogger } from "../../src/utils/logger.js";
@@ -104,9 +103,8 @@ export const buildCommand = {
 
     const routes = scanAppFiles(appDir);
     const events = countEventFiles(appDir);
-    const cronJobs = scanScheduleFiles(appDir).length;
 
-    appLogger.info(`  ${routes.length} route(s), ${events} event(s), ${cronJobs} cron job(s)`);
+    appLogger.info(`  ${routes.length} route(s), ${events} event(s)`);
     appLogger.info("  compiling...");
 
     const start = Date.now();

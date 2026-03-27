@@ -4,11 +4,7 @@ import { dirname, resolve } from "node:path";
 import type { RadixTree, RadixTreePerMethod } from "./radixTree.js";
 import { buildRadixTree, buildRadixTreeForMethod } from "./radixTree.js";
 import { getMethodsExportedByRouteFile } from "./routeLoader.js";
-
-const cache = new Map<string, ScannedRoute[]>();
-const radixCache = new Map<string, RadixTree>();
-/** Per-method trees (find-my-way style): key = `${appDir}\0${method}` */
-const radixPerMethodCache = new Map<string, RadixTreePerMethod>();
+import { cache } from "../cache/cache.js";
 
 function getRoutesDir(appDir: string): string {
   return resolve(appDir, "router");
@@ -75,20 +71,22 @@ export async function validateRouteConflictsAsync(
 }
 
 export function getRouteTable(appDir: string): ScannedRoute[] {
-  let table = cache.get(appDir);
+  let table = cache.getFromCache("routeTableCache", appDir) as
+    | ScannedRoute[]
+    | undefined;
   if (!table) {
     table = scanAppFiles(getRoutesDir(appDir));
-    cache.set(appDir, table);
+    cache.setInCache("routeTableCache", appDir, table);
   }
   return table;
 }
 
 /** Radix tree for O(path depth) route lookup. Cached per appDir. */
 export function getRadixTree(appDir: string): RadixTree {
-  let tree = radixCache.get(appDir);
+  let tree = cache.getFromCache("radixCache", appDir) as RadixTree | undefined;
   if (!tree) {
     tree = buildRadixTree(getRouteTable(appDir));
-    radixCache.set(appDir, tree);
+    cache.setInCache("radixCache", appDir, tree);
   }
   return tree;
 }
@@ -99,10 +97,12 @@ export function getRadixTreeForMethod(
   method: string,
 ): RadixTreePerMethod {
   const key = `${appDir}\0${method}`;
-  let tree = radixPerMethodCache.get(key);
+  let tree = cache.getFromCache("radixPerMethodCache", key) as
+    | RadixTreePerMethod
+    | undefined;
   if (!tree) {
     tree = buildRadixTreeForMethod(getRouteTable(appDir), method);
-    radixPerMethodCache.set(key, tree);
+    cache.setInCache("radixPerMethodCache", key, tree);
   }
   return tree;
 }
@@ -128,12 +128,13 @@ export function addRouteFileToTable(appDir: string, filePath: string): void {
     );
     if (!exists) table.push(r);
   }
-  cache.set(appDir, table);
+  cache.setInCache("routeTableCache", appDir, table);
 
   // Invalidate radix trees for this appDir; they will rebuild on next access.
-  radixCache.delete(appDir);
-  for (const key of radixPerMethodCache.keys()) {
-    if (key.startsWith(appDir + "\0")) radixPerMethodCache.delete(key);
+  cache.removeFromCache("radixCache", appDir);
+  const radixPerMethod = cache.getCache("radixPerMethodCache");
+  for (const key of radixPerMethod.keys()) {
+    if (key.startsWith(appDir + "\0")) cache.removeFromCache("radixPerMethodCache", key);
   }
 }
 
@@ -143,23 +144,25 @@ export function removeRouteFileFromTable(appDir: string, filePath: string): void
   const table = getRouteTable(appDir).filter(
     (r) => resolve(r.filePath) !== target,
   );
-  cache.set(appDir, table);
-  radixCache.delete(appDir);
-  for (const key of radixPerMethodCache.keys()) {
-    if (key.startsWith(appDir + "\0")) radixPerMethodCache.delete(key);
+  cache.setInCache("routeTableCache", appDir, table);
+  cache.removeFromCache("radixCache", appDir);
+  const radixPerMethod = cache.getCache("radixPerMethodCache");
+  for (const key of radixPerMethod.keys()) {
+    if (key.startsWith(appDir + "\0")) cache.removeFromCache("radixPerMethodCache", key);
   }
 }
 
 export function clearRouteTableCache(appDir?: string): void {
   if (appDir) {
-    cache.delete(appDir);
-    radixCache.delete(appDir);
-    for (const k of radixPerMethodCache.keys()) {
-      if (k.startsWith(appDir + "\0")) radixPerMethodCache.delete(k);
+    cache.removeFromCache("routeTableCache", appDir);
+    cache.removeFromCache("radixCache", appDir);
+    const radixPerMethod = cache.getCache("radixPerMethodCache");
+    for (const k of radixPerMethod.keys()) {
+      if (k.startsWith(appDir + "\0")) cache.removeFromCache("radixPerMethodCache", k);
     }
   } else {
-    cache.clear();
-    radixCache.clear();
-    radixPerMethodCache.clear();
+    cache.clearCache("routeTableCache");
+    cache.clearCache("radixCache");
+    cache.clearCache("radixPerMethodCache");
   }
 }

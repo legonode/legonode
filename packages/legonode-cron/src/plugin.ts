@@ -1,0 +1,153 @@
+import type { LegonodePlugin } from "legonode";
+
+import {
+  clearScheduleRunnerCache,
+  getOrCreateScheduleRunner,
+  loadSchedulesFromApp,
+} from "./scheduleLoader.js";
+import { runScheduler } from "./runScheduler.js";
+
+export type CronPluginOptions = {
+  /** Disable scheduler in `disableDevCron` command (default: false). */
+  disableDevCron?: boolean;
+}
+
+export type ScheduleWhenOptions = {
+  /** Run at an absolute time (Date, epoch ms, or Date-parsable string). */
+  at?: Date | number | string;
+  /** Run after this delay (ms). */
+  delayMs?: number;
+};
+
+export type ScheduleInvokeFn = (
+  name: string,
+  payload?: unknown,
+  options?: ScheduleWhenOptions,
+) => void | Promise<void>;
+
+declare module "legonode" {
+  interface LegonodeContext {
+    schedule: ScheduleInvokeFn;
+  }
+}
+
+function parseAtMs(at: NonNullable<ScheduleWhenOptions["at"]>): number | null {
+  if (typeof at === "number") return Number.isFinite(at) ? at : null;
+  if (at instanceof Date) {
+    const ms = at.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof at === "string") {
+    const ms = Date.parse(at);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return null;
+}
+
+function isCronFile(filename?: string): boolean {
+  if (!filename) return false;
+  const normalized = filename.replaceAll("\\", "/");
+  // Bun/Node watch commonly reports paths like "src/cron/x.cron.ts", not "cron/x.cron.ts".
+  return normalized.includes("/cron/") && /\.cron\.(ts|js|mts|mjs)$/i.test(normalized);
+}
+
+export function Cron(options: CronPluginOptions = {}): LegonodePlugin {
+  const disableDevCron = options.disableDevCron === true;
+  let stopScheduler: (() => void) | null = null;
+  let currentAppDir = "";
+
+  function attachSchedule(ctx: import("legonode").LegonodeContext): void {
+    ctx.schedule = async (name, payload, when) => {
+      const appDir = currentAppDir;
+      if (!appDir) return;
+      const runner = await getOrCreateScheduleRunner(appDir);
+
+      const delayMs =
+        typeof when?.delayMs === "number" && Number.isFinite(when.delayMs)
+          ? Math.max(0, when.delayMs)
+          : null;
+      const atMs = when?.at !== undefined ? parseAtMs(when.at) : null;
+
+      if (delayMs === null && atMs === null) {
+        await runner(name, payload);
+        return;
+      }
+
+      const computedDelay =
+        delayMs !== null ? delayMs : Math.max(0, (atMs ?? Date.now()) - Date.now());
+      if (computedDelay <= 0) {
+        await runner(name, payload);
+        return;
+      }
+      setTimeout(() => {
+        void runner(name, payload);
+      }, computedDelay);
+    };
+  }
+
+  async function startScheduler(appDir?: string, cacheBust = false): Promise<void> {
+    if (!appDir) return;
+    if (cacheBust) {
+      process.env.LEGONODE_CRON_RELOAD_TOKEN = String(Date.now());
+      clearScheduleRunnerCache(appDir);
+    }
+    stopScheduler?.();
+    stopScheduler = null;
+    currentAppDir = appDir;
+
+    const tasks = await loadSchedulesFromApp(appDir, process.env.LEGONODE_CRON_RELOAD_TOKEN);
+    if (tasks.length === 0) return;
+
+    stopScheduler = runScheduler(tasks, {
+      onError: (name, error) => {
+        console.error(`[legonode cron ${name}]`, error);
+      }
+    });
+  }
+
+  function stopCurrent(): void {
+    stopScheduler?.();
+    stopScheduler = null;
+    if (currentAppDir) clearScheduleRunnerCache(currentAppDir);
+  }
+
+  return {
+    name: "@legonode/cron",
+    onRequest(ctx) {
+      attachSchedule(ctx);
+    },
+    async onDevStart(ctx) {
+      // Keep appDir for manual ctx.schedule(...) even when dev scheduler is disabled.
+      if (ctx.appDir) currentAppDir = ctx.appDir;
+      if (disableDevCron) return;
+      await startScheduler(ctx.appDir);
+    },
+    async onDevFileChange(ctx) {
+      const changed = ctx.changedPath ?? ctx.filename;
+      if (!isCronFile(changed)) return;
+      // Manual schedule() uses the cached runner too; bust it on cron file changes.
+      if (ctx.appDir) {
+        currentAppDir = ctx.appDir;
+        process.env.LEGONODE_CRON_RELOAD_TOKEN = String(Date.now());
+        clearScheduleRunnerCache(ctx.appDir);
+      }
+      if (disableDevCron) return;
+      await startScheduler(ctx.appDir, true);
+    },
+    onDevRestart() {
+      stopCurrent();
+    },
+    onDevStop() {
+      stopCurrent();
+    },
+    async onStartListening(ctx) {
+      await startScheduler(ctx.appDir);
+    },
+    onStartStop() {
+      stopCurrent();
+    },
+    onStartError() {
+      stopCurrent();
+    }
+  };
+}

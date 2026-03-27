@@ -13,10 +13,6 @@ export interface HeroSectionProps {
   description?: string;
   /** Lottie animation URL (e.g. /hero-animation.json) */
   lottieSrc?: string;
-  /** Primary CTA label */
-  primaryCtaLabel?: string;
-  /** Primary CTA href (e.g. /docs) */
-  primaryCtaHref?: string;
   /** Secondary CTA label */
   secondaryCtaLabel?: string;
   /** Secondary CTA href */
@@ -38,8 +34,6 @@ export function HeroSection({
   title = defaults.title,
   description = defaults.description,
   lottieSrc = "/hero-animation.json",
-  primaryCtaLabel = defaults.primaryCtaLabel,
-  primaryCtaHref = defaults.primaryCtaHref,
   secondaryCtaLabel = defaults.secondaryCtaLabel,
   secondaryCtaHref = defaults.secondaryCtaHref,
   className,

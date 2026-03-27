@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { invalidateModuleCache } from "../loader/moduleCache.js";
+import { invalidateModuleCache } from "./moduleCache.js";
 import type { Schedule, ScheduleDef, LoadedTask, TaskRunFn, TaskContext } from "./types.js";
 
 const CRON_EXTENSIONS = [".cron.ts", ".cron.js", ".cron.mts", ".cron.mjs"];

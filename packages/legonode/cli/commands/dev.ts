@@ -2,19 +2,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { watch, type FSWatcher, existsSync } from "node:fs";
 import { createNodeServer, setupServer } from "../../src/server/server.js";
-import { clearRuntimeCache } from "../../src/server/requestHandler.js";
+import { clearRuntimeCache, clearTurboPlanCache } from "../../src/server/requestHandler.js";
 import { loadConfig, getAppDir } from "../../src/config/loadConfig.js";
 import { validateApp } from "../../src/validation/validateApp.js";
 import { clearPipelineCache } from "../../src/pipeline/pipelineCache.js";
 import { clearMiddlewareTableCache } from "../../src/middleware/middlewareTable.js";
 import { clearMiddlewareResolverCache } from "../../src/middleware/middlewareResolver.js";
-import {
-  clearScheduleRunnerCache,
-  loadSchedulesFromApp,
-} from "../../src/schedules/scheduleLoader.js";
 import { clearEventBusCache } from "../../src/events/eventExecutor.js";
+import { clearRouteSecurityConfigCache } from "../../src/security/securityConfigLoader.js";
 import { reloadRoutes } from "../../src/router/routeLoader.js";
-import { runScheduler } from "../../src/schedules/runScheduler.js";
 import { runPluginHook } from "../pluginHooks.js";
 import { appLogger } from "../../src/utils/logger.js";
 
@@ -29,7 +25,7 @@ const WATCH_FILES_EXTENSIONS = [".ts", ".js", ".mts", ".mjs", ".json"];
 const WATCH_FILES_EXTENSIONS_REGEX = new RegExp(`(${WATCH_FILES_EXTENSIONS.join("|")})$`);
 
 function isWatchFile(filename: string): "watch" | "incomingMessage" | "other" {
-  if (WATCH_FILES_EXTENSIONS_REGEX.test(filename)) {
+  if (WATCH_FILES_EXTENSIONS_REGEX.test(filename) && !filename.startsWith(".legonode")) {
     return "watch";
   } else {
     return "other";
@@ -115,7 +111,7 @@ async function run(opts: DevOptions = {}) {
       async (_event, filename) => {
         if (!filename || isWatchFile(filename) === "other") return;
         const currentDir = appDirRef.current;
-        const changedPath = resolve(currentDir, filename);
+        const changedPath = resolve(cwd, filename);
         
         const fileType = getFileTypeForReload(filename);
 
@@ -123,24 +119,27 @@ async function run(opts: DevOptions = {}) {
 
         if (fileType === "route") {
           await reloadRoutes({ currentDir, changedPath, fileExists, filename });
+          clearTurboPlanCache(currentDir);
         } else if (fileType === "middleware") {
           process.env.LEGONODE_MIDDLEWARE_RELOAD_TOKEN = String(Date.now());
           clearMiddlewareTableCache(currentDir);
           clearMiddlewareResolverCache(currentDir);
           clearPipelineCache(currentDir);
+          clearTurboPlanCache(currentDir);
           appLogger.info(`[legonode] reload: middleware (${filename})`);
-        } else if (fileType === "cron") {
-          process.env.LEGONODE_CRON_RELOAD_TOKEN = String(Date.now());
-          clearScheduleRunnerCache(currentDir);
+        } else if (fileType === "security") {
+          process.env.LEGONODE_SECURITY_RELOAD_TOKEN = String(Date.now());
+          clearRouteSecurityConfigCache(currentDir);
           clearRuntimeCache(currentDir);
-          appLogger.info(`[legonode] reload: cron (${filename})`);
+          clearTurboPlanCache(currentDir);
+          appLogger.info(`[legonode] reload: security (${filename})`);
         } else if (fileType === "event") {
           process.env.LEGONODE_EVENT_RELOAD_TOKEN = String(Date.now());
           clearEventBusCache(currentDir);
           clearRuntimeCache(currentDir);
           appLogger.info(`[legonode] reload: events (${filename})`);
         } else if (fileType === "plugin") {
-          appLogger.error(`[legonode] Reload: Plugin(${filename}) restart the server to reload the plugins`);
+          restartCommand({ reason: "plugin-change" });
         }
         else{
           appLogger.info(`[legonode] reload: Changes Detected in (${filename})`);
@@ -175,7 +174,9 @@ async function run(opts: DevOptions = {}) {
   let restartTimeout: ReturnType<typeof setTimeout> | null = null;
   let restartInProgress = false;
 
-  function restartCommand() {
+  function restartCommand(
+    opts: { reason?: "config-change" | "plugin-change" } = {},
+  ) {
     if (restartInProgress) return;
     if (
       configWatchStartTime &&
@@ -185,6 +186,7 @@ async function run(opts: DevOptions = {}) {
     if (lastRestartTime && Date.now() - lastRestartTime < CONFIG_COOLDOWN_MS)
       return;
     if (restartTimeout) clearTimeout(restartTimeout);
+    const restartReason = opts.reason ?? "config-change";
     restartTimeout = setTimeout(async () => {
       restartTimeout = null;
       if (restartInProgress) return;
@@ -202,14 +204,18 @@ async function run(opts: DevOptions = {}) {
           restartChild = null;
         }
         await new Promise((r) => setTimeout(r, 500));
-        appLogger.info("[legonode] config changed, restarting...");
+        appLogger.info(
+          restartReason === "plugin-change"
+            ? "[legonode] plugins changed, restarting..."
+            : "[legonode] config changed, restarting...",
+        );
         await runPluginHook(plugins, "onDevRestart", {
           command: "dev",
           cwd,
           appDir: appDirRef.current,
           host,
           port,
-          reason: "config-change",
+          reason: restartReason,
         });
         const exec = process.argv[0] ?? process.execPath;
         const args = process.argv.slice(1);
@@ -257,39 +263,11 @@ async function run(opts: DevOptions = {}) {
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
-  const isCron = config.dev?.cron !== false;
-  let ScheduleRunner: () => void = () => {};
-  if (isCron) {
-    const tasks = await loadSchedulesFromApp(appDir);
-    if (tasks.length > 0) {
-      ScheduleRunner = runScheduler(tasks, {
-        onRun: async (name, taskCtx) => {
-          await runPluginHook(plugins, "onCronRun", undefined, {
-            name,
-            payload: taskCtx.payload,
-            source: "scheduler",
-          });
-        },
-        onError: (name, err) => {
-          void runPluginHook(plugins, "onCronError", undefined, {
-            name,
-            payload: undefined,
-            source: "scheduler",
-            error: err,
-          });
-          appLogger.error(`[legonode task ${name}]`, err);
-        },
-      });
-    }
-  } else if (ScheduleRunner && !isCron) {
-    ScheduleRunner();
-    ScheduleRunner = () => {};
-  }
 }
 
 function getFileTypeForReload(
   filename: string,
-): "route" | "middleware" | "cron" | "event" | "plugin" | "other" {
+): "route" | "middleware" | "security" | "event" | "plugin" | "other" {
   if (
     /(?:route\.(ts|js|mts|mjs)$|(?:get|post|put|patch|delete|head|options)(?:\.route)?\.(ts|js|mts|mjs)$)/.test(
       filename,
@@ -298,11 +276,8 @@ function getFileTypeForReload(
     return "route";
   } else if (/middleware\.(ts|js|mts|mjs)$/.test(filename)) {
     return "middleware";
-  } else if (
-    filename.startsWith("cron/") &&
-    /\.cron\.(ts|js|mts|mjs)$/.test(filename)
-  ) {
-    return "cron";
+  } else if (/security\.(ts|js|mts|mjs)$/.test(filename)) {
+    return "security";
   } else if (
     filename.startsWith("events/") &&
     /\.event\.(ts|js|mts|mjs)$/.test(filename)
