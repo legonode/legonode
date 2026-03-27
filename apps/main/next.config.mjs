@@ -12,10 +12,6 @@ const config = {
         source: '/docs/:path*.mdx',
         destination: '/llms.mdx/docs/:path*',
       },
-      {
-        source: "/api/:path*",
-        destination: `${process.env.BACKEND_URL}/api/:path*`,
-      },
     ];
   },
 };
