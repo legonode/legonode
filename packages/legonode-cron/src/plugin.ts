@@ -51,7 +51,7 @@ function isCronFile(filename?: string): boolean {
   return normalized.includes("/cron/") && /\.cron\.(ts|js|mts|mjs)$/i.test(normalized);
 }
 
-export function createCronPlugin(options: CronPluginOptions = {}): LegonodePlugin {
+export function Cron(options: CronPluginOptions = {}): LegonodePlugin {
   const disableDevCron = options.disableDevCron === true;
   let stopScheduler: (() => void) | null = null;
   let currentAppDir = "";

@@ -11,5 +11,5 @@ export {
 export { runScheduler } from "./runScheduler.js";
 export type { RunSchedulerOptions } from "./runScheduler.js";
 export { getIntervalMs, isAtSchedule, getNextRunMs } from "./parseSchedule.js";
-export { createCronPlugin } from "./plugin.js";
+export { Cron } from "./plugin.js";
 export type { CronPluginOptions, ScheduleWhenOptions, ScheduleInvokeFn } from "./plugin.js";
