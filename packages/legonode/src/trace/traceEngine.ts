@@ -5,7 +5,7 @@ export type TraceStartData = {
   traceId: string;
   method: string;
   pathname: string;
-  startTime: string;
+  startTime: number;
 };
 
 /** Data recorded for one request span. Passed to the tracer callback on span end. */
@@ -24,10 +24,10 @@ export type TraceData = {
   responseSize?: number;
   /** Span duration in milliseconds. */
   durationMs: number;
-  /** Start time (ISO string). */
-  startTime: string;
-  /** End time (ISO string). */
-  endTime: string;
+  /** Start time epoch millis. */
+  startTime: number;
+  /** End time epoch millis. */
+  endTime: number;
   /** Optional error message when handler threw. */
   error?: string;
   /** Custom annotations (set internally by framework from request lifecycle). */
@@ -76,7 +76,7 @@ export function createTraceSpan(tracer?: TracerFn, traceStart?: TraceStartFn): T
         traceId,
         method,
         pathname,
-        startTime: new Date(startTime).toISOString(),
+        startTime,
       });
     },
 
@@ -100,8 +100,8 @@ export function createTraceSpan(tracer?: TracerFn, traceStart?: TraceStartFn): T
         method: (initialMeta.method as string) ?? "GET",
         pathname: (initialMeta.pathname as string) ?? "",
         durationMs,
-        startTime: new Date(start).toISOString(),
-        endTime: new Date(endTime).toISOString(),
+        startTime: start,
+        endTime,
         annotations: { ...annotations },
         ...(routeId !== undefined && routeId !== null && { routeId }),
         ...(statusCode !== undefined && statusCode !== null && { statusCode }),

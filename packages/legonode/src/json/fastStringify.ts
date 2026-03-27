@@ -1,6 +1,7 @@
 import fastJsonStringify from "fast-json-stringify";
 import type { ResponseSchemaMap } from "../validation/routeSchema.js";
 import type { SimpleSchemaShape } from "../validation/routeSchema.js";
+import { cache } from "../cache/cache.js";
 
 function isZodType(v: unknown): boolean {
   return (
@@ -51,23 +52,23 @@ function simpleShapeToJsonSchema(shape: SimpleSchemaShape): JsonSchemaObject {
   return out;
 }
 
-const serializerCache = new Map<string, (data: unknown) => string>();
-
 function cacheKey(schema: JsonSchemaObject): string {
   return JSON.stringify(schema);
 }
 
 function getCachedSerializer(jsonSchema: JsonSchemaObject): (data: unknown) => string {
   const key = cacheKey(jsonSchema);
-  let fn = serializerCache.get(key);
+  let fn = cache.getFromCache("serializerCache", key) as
+    | ((data: unknown) => string)
+    | undefined;
   if (!fn) {
     try {
       const stringify = fastJsonStringify(jsonSchema as Parameters<typeof fastJsonStringify>[0]);
       fn = (data: unknown) => stringify(data);
-      serializerCache.set(key, fn);
+      cache.setInCache("serializerCache", key, fn);
     } catch {
       fn = (data: unknown) => JSON.stringify(data);
-      serializerCache.set(key, fn);
+      cache.setInCache("serializerCache", key, fn);
     }
   }
   return fn;
@@ -83,6 +84,12 @@ export function getStringifier(
 ): ((data: unknown) => string) | null {
   const part = responseSchema?.[status];
   if (part == null || !isSimpleSchemaShape(part)) return null;
+  const cachedByIdentity = cache.getFromCache("serializerByShape", part as object) as
+    | ((data: unknown) => string)
+    | undefined;
+  if (cachedByIdentity) return cachedByIdentity;
   const jsonSchema = simpleShapeToJsonSchema(part);
-  return getCachedSerializer(jsonSchema);
+  const serializer = getCachedSerializer(jsonSchema);
+  cache.setInCache("serializerByShape", part as object, serializer);
+  return serializer;
 }

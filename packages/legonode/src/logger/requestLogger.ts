@@ -7,10 +7,8 @@ export type RequestLogLevel = "trace" | "debug" | "info" | "warn" | "error" | "f
 export type RequestLogEntry = {
   level: RequestLogLevel;
   args: unknown[];
-  timestamp: string;
+  timestamp: string | number;
 };
-
-const LOG_LEVEL_METHODS = new Set<RequestLogLevel>(["trace", "debug", "info", "warn", "error", "fatal"]);
 
 let defaultLogger: Logger | null = null;
 
@@ -44,6 +42,7 @@ export function setBaseLogger(logger: Logger): void {
 /** Create a request-scoped logger with traceId so all logs correlate with the same request/trace. */
 export function createRequestLogger(traceId: string, base?: Logger, sink?: RequestLogEntry[]): LegonodeLogger {
   const baseLogger = base ?? getBaseLogger();
+  if (!traceId && !sink) return baseLogger;
   const requestLogger = baseLogger.child(traceId ? { traceId } : {});
   if (!sink) return requestLogger;
   return wrapLoggerWithSink(requestLogger, sink);
@@ -55,27 +54,43 @@ export function getNoopLogger(): LegonodeLogger {
 }
 
 function wrapLoggerWithSink(logger: LegonodeLogger, sink: RequestLogEntry[]): LegonodeLogger {
-  return new Proxy(logger, {
-    get(target, prop, receiver) {
-      const raw = Reflect.get(target, prop, receiver);
-      if (typeof prop === "string" && LOG_LEVEL_METHODS.has(prop as RequestLogLevel) && typeof raw === "function") {
-        const level = prop as RequestLogLevel;
-        return (...args: unknown[]) => {
-          sink.push({
-            level,
-            args,
-            timestamp: new Date().toISOString()
-          });
-          return (raw as (...x: unknown[]) => unknown).apply(target, args);
-        };
-      }
-      if (prop === "child" && typeof raw === "function") {
-        return (...args: unknown[]) => {
-          const child = (raw as (...x: unknown[]) => LegonodeLogger).apply(target, args);
-          return wrapLoggerWithSink(child, sink);
-        };
-      }
-      return raw;
-    }
-  }) as LegonodeLogger;
+  const base = logger as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const wrapped = Object.create(logger) as LegonodeLogger;
+  const push = (level: RequestLogLevel, args: unknown[]) => {
+    sink.push({
+      level,
+      args,
+      timestamp: new Date().toISOString()
+    });
+  };
+
+  wrapped.trace = (...args: unknown[]) => {
+    push("trace", args);
+    return base.trace?.(...args);
+  };
+  wrapped.debug = (...args: unknown[]) => {
+    push("debug", args);
+    return base.debug?.(...args);
+  };
+  wrapped.info = (...args: unknown[]) => {
+    push("info", args);
+    return base.info?.(...args);
+  };
+  wrapped.warn = (...args: unknown[]) => {
+    push("warn", args);
+    return base.warn?.(...args);
+  };
+  wrapped.error = (...args: unknown[]) => {
+    push("error", args);
+    return base.error?.(...args);
+  };
+  wrapped.fatal = (...args: unknown[]) => {
+    push("fatal", args);
+    return base.fatal?.(...args);
+  };
+  wrapped.child = ((bindings: object, options?: unknown) => {
+    const child = (base.child?.(bindings, options) as LegonodeLogger) ?? logger.child(bindings);
+    return wrapLoggerWithSink(child, sink);
+  }) as unknown as LegonodeLogger["child"];
+  return wrapped;
 }

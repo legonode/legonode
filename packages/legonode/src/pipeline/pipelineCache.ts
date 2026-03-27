@@ -2,10 +2,13 @@ import type { LegonodeContext } from "../core/context.js";
 import type { LoadedRoute } from "../router/routeLoader.js";
 import type { Middleware } from "../middleware/middlewareRunner.js";
 import { mergeRouteSchema } from "../validation/routeSchema.js";
-import { validateRoute, ValidationError } from "../validation/routeSchema.js";
+import {
+  compileRouteValidators,
+  validateRouteWithCompiled,
+  ValidationError,
+} from "../validation/routeSchema.js";
 import { compose } from "./compose.js";
-
-const pipelineCache = new Map<string, (ctx: LegonodeContext) => unknown | Promise<unknown>>();
+import { cache } from "../cache/cache.js";
 
 function pipelineCacheKey(appDir: string, pathname: string, method: string): string {
   return `${appDir}\0${pathname}\0${method}`;
@@ -23,8 +26,9 @@ function createValidationMiddleware(
   mergedSchema: ReturnType<typeof mergeRouteSchema>,
   method: string
 ): Middleware {
+  const compiled = compileRouteValidators(mergedSchema);
   return (ctx: LegonodeContext, next: () => Promise<void>) => {
-    const v = validateRoute(mergedSchema, method, {
+    const v = validateRouteWithCompiled(compiled, method, {
       body: ctx.body,
       params: ctx.params,
       query: ctx.query
@@ -46,7 +50,9 @@ export function getOrCreatePipeline(
   middleware: Middleware[]
 ): (ctx: LegonodeContext) => unknown | Promise<unknown> {
   const key = pipelineCacheKey(appDir, pathname, method);
-  let fn = pipelineCache.get(key);
+  let fn = cache.getFromCache("pipelineCache", key) as
+    | ((ctx: LegonodeContext) => unknown | Promise<unknown>)
+    | undefined;
   if (fn) return fn;
   const mergedSchema = mergeRouteSchema(route.schema, route.methodSchema);
   const hasValidation = !!(mergedSchema.body ?? mergedSchema.params ?? mergedSchema.query);
@@ -61,7 +67,7 @@ export function getOrCreatePipeline(
       return Promise.reject(e);
     }
   };
-  pipelineCache.set(key, fn);
+  cache.setInCache("pipelineCache", key, fn);
   return fn;
 }
 
@@ -76,15 +82,17 @@ const ALL_HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTI
 
 export function clearPipelineForRoute(appDir: string, pathname: string, method: string): void {
   if (method === "") {
-    for (const m of ALL_HTTP_METHODS) pipelineCache.delete(pipelineCacheKey(appDir, pathname, m));
+    for (const m of ALL_HTTP_METHODS)
+      cache.removeFromCache("pipelineCache", pipelineCacheKey(appDir, pathname, m));
   } else {
-    pipelineCache.delete(pipelineCacheKey(appDir, pathname, method));
+    cache.removeFromCache("pipelineCache", pipelineCacheKey(appDir, pathname, method));
   }
 }
 
 export function clearPipelineCache(appDir: string): void {
   const prefix = appDir + "\0";
-  for (const key of pipelineCache.keys()) {
-    if (key.startsWith(prefix)) pipelineCache.delete(key);
+  const pipeline = cache.getCache("pipelineCache");
+  for (const key of pipeline.keys()) {
+    if (key.startsWith(prefix)) cache.removeFromCache("pipelineCache", key);
   }
 }

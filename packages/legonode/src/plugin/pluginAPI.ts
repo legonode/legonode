@@ -1,4 +1,5 @@
 import type { LegonodeContext } from "../core/context.js";
+import type { RouteSchema, ResponseSchemaMap } from "../validation/routeSchema.js";
 
 export type LegonodeCommandName = "dev" | "build" | "start";
 
@@ -13,15 +14,35 @@ export type LegonodeCommandHookContext = {
   filename?: string;
   changedPath?: string;
   fileExists?: boolean;
-  fileType?: "route" | "middleware" | "cron" | "event" | "other";
+  fileType?: "route" | "middleware" | "security" | "event" | "plugin" | "other";
   name?: string;
   source?: "manual" | "scheduler";
   payload?: unknown;
   error?: unknown;
 };
 
+/** One route (pathname + HTTP method) with validation/response schemas from the loaded route module. */
+export type InitRouteEntry = {
+  pathname: string;
+  filePath: string;
+  method: string;
+  schema?: RouteSchema;
+  methodSchema?: RouteSchema;
+  responseSchema?: ResponseSchemaMap;
+};
+
+/** Full app manifest passed to `init` once when the runtime is created. */
+export type LegonodeInitContext = {
+  appDir: string;
+  routes: InitRouteEntry[];
+  events: Array<{ name: string; filePath: string }>;
+  middlewares: Array<{ pathPrefix: string; filePath: string }>;
+};
+
 export type LegonodePlugin = {
   name: string;
+  /** Runs once after routes, middleware, pipelines, and events are loaded. */
+  init?: (ctx: LegonodeInitContext) => void | Promise<void>;
   onRequest?: (ctx: LegonodeContext) => void | Promise<void>;
   onRouteMatch?: (ctx: LegonodeContext) => void | Promise<void>;
   onMiddlewareResolved?: (
@@ -31,14 +52,6 @@ export type LegonodePlugin = {
   onEventEmit?: (
     ctx: LegonodeContext,
     info: { name: string; payload?: unknown }
-  ) => void | Promise<void>;
-  onCronRun?: (
-    ctx: LegonodeContext | undefined,
-    info: { name: string; payload?: unknown; source: "manual" | "scheduler" }
-  ) => void | Promise<void>;
-  onCronError?: (
-    ctx: LegonodeContext | undefined,
-    info: { name: string; payload?: unknown; source: "manual" | "scheduler"; error: unknown }
   ) => void | Promise<void>;
   beforeHandler?: (ctx: LegonodeContext) => void | Promise<void>;
   afterHandler?: (ctx: LegonodeContext, result: unknown) => void | Promise<void>;

@@ -1,6 +1,7 @@
 import { dirname, relative, resolve } from "node:path";
 import { getRadixTreeForMethod, getRouteTable, addRouteFileToTable } from "./routeTable.js";
 import { loadRoute, type LoadedRoute } from "./routeLoader.js";
+import { cache } from "../cache/cache.js";
 
 /** Route + params without spreading LoadedRoute (avoids allocation). Catch-all params are string[]. */
 export type ResolvedRoute = {
@@ -11,10 +12,6 @@ export type ResolvedRoute = {
 };
 
 type CachedRoute = LoadedRoute | null | Promise<LoadedRoute | null>;
-
-const routeCache = new Map<string, CachedRoute>();
-/** Cached resolved route for static routes (no params). */
-const staticResolvedCache = new Map<string, ResolvedRoute>();
 
 function routeCacheKey(appDir: string, filePath: string, method: string): string {
   return `${appDir}\0${filePath}\0${method}`;
@@ -47,19 +44,21 @@ export function resolveRoute(
 
   const key = routeCacheKey(appDir, match.filePath, method);
   const middlewarePath = getMiddlewarePathFromFile(appDir, match.filePath);
-  const cached = routeCache.get(key);
+  const cached = cache.getFromCache("routeCache", key) as CachedRoute | undefined;
   if (cached !== undefined && !isPromise(cached)) {
     if (!cached) return null;
     const paramCount = Object.keys(match.params).length;
     if (paramCount === 0) {
-      let resolved = staticResolvedCache.get(key);
+      let resolved = cache.getFromCache("staticResolvedCache", key) as
+        | ResolvedRoute
+        | undefined;
       if (!resolved) {
         resolved = {
           route: cached,
           params: Object.create(null) as Record<string, string | string[]>,
           middlewarePath
         };
-        staticResolvedCache.set(key, resolved);
+        cache.setInCache("staticResolvedCache", key, resolved);
       }
       return resolved;
     }
@@ -70,10 +69,10 @@ export function resolveRoute(
     loadPromise = cached;
   } else {
     loadPromise = loadRoute(match.filePath, method, match.routeId);
-    routeCache.set(key, loadPromise);
+    cache.setInCache("routeCache", key, loadPromise);
   }
   return loadPromise.then((loaded) => {
-    routeCache.set(key, loaded);
+    cache.setInCache("routeCache", key, loaded);
     if (!loaded) return null;
     return { route: loaded, params: match.params, middlewarePath };
   });
@@ -110,11 +109,12 @@ export async function preloadRoutes(appDir: string): Promise<void> {
       // route.ts (method "") exports GET, POST, etc. per method — only cache under "" so we load with the real HTTP method on first request
       const keys = method === "" ? [""] : [method];
       const key = routeCacheKey(appDir, filePath, keys[0]!);
-      if (routeCache.has(key)) continue;
+      if (cache.getCache("routeCache").has(key)) continue;
       const p = loadRoute(filePath, method, pathname);
-      for (const m of keys) routeCache.set(routeCacheKey(appDir, filePath, m), p);
+      for (const m of keys) cache.setInCache("routeCache", routeCacheKey(appDir, filePath, m), p);
       promises.push(p.then((loaded) => {
-        for (const m of keys) routeCache.set(routeCacheKey(appDir, filePath, m), loaded);
+        for (const m of keys)
+          cache.setInCache("routeCache", routeCacheKey(appDir, filePath, m), loaded);
       }));
     }
   }
@@ -146,8 +146,8 @@ export async function reloadRoute(appDir: string, filePath: string): Promise<voi
   }
   for (const m of methodsToClear) {
     const key = routeCacheKey(appDir, filePathForKey, m);
-    routeCache.delete(key);
-    staticResolvedCache.delete(key);
+    cache.removeFromCache("routeCache", key);
+    cache.removeFromCache("staticResolvedCache", key);
   }
 
   const promises: Promise<void>[] = [];
@@ -159,10 +159,12 @@ export async function reloadRoute(appDir: string, filePath: string): Promise<voi
     if (seen.has(cacheKey)) continue;
     seen.add(cacheKey);
     const p = loadRoute(r.filePath, method, r.pathname);
-    for (const m of keys) routeCache.set(routeCacheKey(appDir, filePathForKey, m), p);
+    for (const m of keys)
+      cache.setInCache("routeCache", routeCacheKey(appDir, filePathForKey, m), p);
     promises.push(
       p.then((loaded) => {
-        for (const m of keys) routeCache.set(routeCacheKey(appDir, filePathForKey, m), loaded);
+        for (const m of keys)
+          cache.setInCache("routeCache", routeCacheKey(appDir, filePathForKey, m), loaded);
       })
     );
   }

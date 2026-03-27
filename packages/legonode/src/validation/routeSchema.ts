@@ -73,6 +73,12 @@ export type ResponseValidationResult =
   | { ok: true }
   | { ok: false; details: unknown };
 
+export type CompiledRouteValidators = {
+  body?: z.ZodTypeAny;
+  params?: z.ZodTypeAny;
+  query?: z.ZodTypeAny;
+};
+
 /** Validate response body against a schema (e.g. from config.responses[200] or GET_RESPONSE_SCHEMA[201]). */
 export function validateResponseBody(schema: SchemaPart, data: unknown): ResponseValidationResult {
   const zodSchema = toZodSchema(schema);
@@ -204,6 +210,61 @@ export function validateRoute(
   if (schema.query) {
     const querySchema = toZodSchema(schema.query);
     const parsed = querySchema.safeParse(queryObj);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        status: 400,
+        json: { error: "Invalid query", details: parsed.error.flatten() }
+      };
+    }
+    (result as { query?: Record<string, string> }).query = parsed.data as Record<string, string>;
+  }
+
+  return result;
+}
+
+export function compileRouteValidators(schema: RouteSchema): CompiledRouteValidators {
+  const out: CompiledRouteValidators = {};
+  if (schema.body) out.body = toZodSchema(schema.body);
+  if (schema.params) out.params = toZodSchema(schema.params);
+  if (schema.query) out.query = toZodSchema(schema.query);
+  return out;
+}
+
+export function validateRouteWithCompiled(
+  validators: CompiledRouteValidators,
+  method: string,
+  ctx: { body: unknown; params: Record<string, string | string[]>; query: Record<string, string> }
+): ValidationResult {
+  const validateBody = BODY_METHODS.has(method);
+  const result: ValidationResult = { ok: true };
+
+  if (validators.body && validateBody) {
+    const parsed = validators.body.safeParse(ctx.body);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        status: 400,
+        json: { error: "Validation failed", details: parsed.error.flatten() }
+      };
+    }
+    (result as { body?: unknown }).body = parsed.data;
+  }
+
+  if (validators.params) {
+    const parsed = validators.params.safeParse(ctx.params);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        status: 400,
+        json: { error: "Invalid params", details: parsed.error.flatten() }
+      };
+    }
+    (result as { params?: Record<string, string | string[]> }).params = parsed.data as Record<string, string | string[]>;
+  }
+
+  if (validators.query) {
+    const parsed = validators.query.safeParse(ctx.query);
     if (!parsed.success) {
       return {
         ok: false,

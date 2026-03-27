@@ -1,10 +1,9 @@
 import type { Middleware } from "./middlewareRunner.js";
 import { getMiddlewarePathsForPathname } from "./middlewareTable.js";
 import { loadMiddlewareFromFile } from "./middlewareLoader.js";
+import { cache } from "../cache/cache.js";
 
 type CachedMiddleware = Middleware[] | Promise<Middleware[]>;
-
-const middlewareCache = new Map<string, CachedMiddleware>();
 
 function middlewareCacheKey(appDir: string, pathname: string, method: string): string {
   return `${appDir}\0${pathname}\0${method}`;
@@ -21,7 +20,9 @@ export type MiddlewareResolver = {
 export function createMiddlewareResolver(appDir: string): MiddlewareResolver {
   return {
     resolveForPathname(pathname: string, method: string): Middleware[] | Promise<Middleware[]> {      const key = middlewareCacheKey(appDir, pathname, method);
-      const cached = middlewareCache.get(key);
+      const cached = cache.getFromCache("middlewareCache", key) as
+        | CachedMiddleware
+        | undefined;
       if (cached !== undefined && !isPromise(cached)) return cached;
       let promise: Promise<Middleware[]>;
       if (cached !== undefined && isPromise(cached)) {
@@ -36,36 +37,37 @@ export function createMiddlewareResolver(appDir: string): MiddlewareResolver {
           }
           return all;
         })();
-        middlewareCache.set(key, promise);
+        cache.setInCache("middlewareCache", key, promise);
       }
       return promise.then((arr) => {
-        middlewareCache.set(key, arr);
+        cache.setInCache("middlewareCache", key, arr);
         return arr;
       });
     }
   };
 }
 
-const resolverCache = new Map<string, MiddlewareResolver>();
-
 export function clearMiddlewareResolverCache(appDir?: string): void {
   if (appDir !== undefined) {
-    resolverCache.delete(appDir);
+    cache.removeFromCache("middlewareResolverCache", appDir);
     const prefix = appDir + "\0";
-    for (const key of middlewareCache.keys()) {
-      if (key.startsWith(prefix)) middlewareCache.delete(key);
+    const middlewareCacheMap = cache.getCache("middlewareCache");
+    for (const key of middlewareCacheMap.keys()) {
+      if (key.startsWith(prefix)) cache.removeFromCache("middlewareCache", key);
     }
   } else {
-    resolverCache.clear();
-    middlewareCache.clear();
+    cache.clearCache("middlewareResolverCache");
+    cache.clearCache("middlewareCache");
   }
 }
 
 export function getOrCreateMiddlewareResolver(appDir: string): MiddlewareResolver {
-  let r = resolverCache.get(appDir);
+  let r = cache.getFromCache("middlewareResolverCache", appDir) as
+    | MiddlewareResolver
+    | undefined;
   if (!r) {
     r = createMiddlewareResolver(appDir);
-    resolverCache.set(appDir, r);
+    cache.setInCache("middlewareResolverCache", appDir, r);
   }
   return r;
 }

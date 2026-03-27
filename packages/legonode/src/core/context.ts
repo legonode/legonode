@@ -8,7 +8,6 @@ import type { RequestLogEntry, LegonodeLogger } from "../logger/requestLogger.js
 export type TraceRef = { readonly traceId: string };
 import { getNoopLogger } from "../logger/requestLogger.js";
 import type { EventEmitterFn } from "../events/eventBus.js";
-import type { ScheduleRunnerFn } from "../schedules/scheduleLoader.js";
 import type { ResponseSchemaMap } from "../validation/routeSchema.js";
 
 export type Response =
@@ -61,7 +60,7 @@ export type LegonodeResponse = {
   reinit?: (nodeRes: ServerResponse, defaultStatusRef: DefaultStatusRef, responseSizeRef?: { current: number }) => void;
 };
 
-export type LegonodeContext = {
+export interface LegonodeContext {
   req: IncomingMessage;
   res: LegonodeResponse;
   /** Path params; catch-all [[...x]] params are string[], others are string. */
@@ -71,8 +70,6 @@ export type LegonodeContext = {
   body: unknown;
   state: Record<string, unknown>;
   emit: EventEmitterFn;
-  /** Trigger a cron by name (e.g. "interval.example"). Same run() as in app/cron/*.cron.ts. */
-  schedule: ScheduleRunnerFn;
   /** Request-scoped logger with traceId in bindings. Use for application logs; tracing is automatic. */
   logger: LegonodeLogger;
   /** Request-scoped captured logger output for plugin/readback use. */
@@ -91,7 +88,7 @@ export type LegonodeContext = {
   __queryCache?: Record<string, string> | undefined;
   /** @internal Ref for beforeSend to resolve ctx when res sends. */
   __ctxRef?: { current: LegonodeContext | null };
-};
+}
 
 /** Map status codes to response body types for typed res.status(code).json(data). */
 export type ResponseBodyByStatus = Record<number, unknown>;
@@ -186,6 +183,10 @@ function createLegonodeResponse(
     return state.explicitStatus ?? state.defaultStatusRef.current;
   }
 
+  function isRawClosed(): boolean {
+    return state.nodeRes.writableEnded || state.nodeRes.destroyed;
+  }
+
   function applyHeaders(): void {
     for (const [k, v] of Object.entries(state.headers)) {
       state.nodeRes.setHeader(k, String(v));
@@ -193,6 +194,10 @@ function createLegonodeResponse(
   }
 
   function doSend(body?: string | Buffer | Uint8Array): void {
+    if (isRawClosed()) {
+      state.sent = true;
+      return;
+    }
     state.sent = true;
     if (state.responseSizeRef) {
       state.responseSizeRef.current =
@@ -208,12 +213,18 @@ function createLegonodeResponse(
   }
 
   function end(body?: string | Buffer | Uint8Array): void | Promise<void> {
-    if (state.sent) return;
+    if (state.sent || isRawClosed()) {
+      state.sent = true;
+      return;
+    }
     if (beforeSend && ctxRef?.current) {
       const c = ctxRef;
       return (async () => {
         await beforeSend(c.current!);
-        if (state.sent) return;
+        if (state.sent || isRawClosed()) {
+          state.sent = true;
+          return;
+        }
         doSend(body);
       })();
     }
@@ -221,7 +232,10 @@ function createLegonodeResponse(
   }
 
   function sendJson(data: unknown): void | Promise<void> {
-    if (state.sent) return;
+    if (state.sent || isRawClosed()) {
+      state.sent = true;
+      return;
+    }
     state.nodeRes.setHeader("content-type", "application/json; charset=utf-8");
     return end(JSON.stringify(data));
   }
@@ -234,18 +248,28 @@ function createLegonodeResponse(
       return end(body);
     },
     text(body: string) {
-      if (state.sent) return;
+      if (state.sent || isRawClosed()) {
+        state.sent = true;
+        return;
+      }
       state.nodeRes.setHeader("content-type", "text/plain; charset=utf-8");
       return end(body);
     },
     html(body: string) {
-      if (state.sent) return;
+      if (state.sent || isRawClosed()) {
+        state.sent = true;
+        return;
+      }
       state.nodeRes.setHeader("content-type", "text/html; charset=utf-8");
       return end(body);
     }
   };
 
   function doRedirect(url: string, code: number): void {
+    if (isRawClosed()) {
+      state.sent = true;
+      return;
+    }
     state.explicitStatus = code;
     if (state.responseSizeRef) state.responseSizeRef.current = 0;
     state.nodeRes.setHeader("location", url);
@@ -256,12 +280,18 @@ function createLegonodeResponse(
   }
 
   function redirect(url: string, code = 302): void | Promise<void> {
-    if (state.sent) return;
+    if (state.sent || isRawClosed()) {
+      state.sent = true;
+      return;
+    }
     if (beforeSend && ctxRef?.current) {
       const c = ctxRef;
       return (async () => {
         await beforeSend(c.current!);
-        if (state.sent) return;
+        if (state.sent || isRawClosed()) {
+          state.sent = true;
+          return;
+        }
         doRedirect(url, code);
       })();
     }
@@ -269,6 +299,10 @@ function createLegonodeResponse(
   }
 
   function doStream(readable: Readable): void {
+    if (isRawClosed()) {
+      state.sent = true;
+      return;
+    }
     state.sent = true;
     if (state.responseSizeRef) state.responseSizeRef.current = 0;
     state.nodeRes.statusCode = effectiveStatus();
@@ -277,12 +311,18 @@ function createLegonodeResponse(
   }
 
   function stream(readable: Readable): void | Promise<void> {
-    if (state.sent) return;
+    if (state.sent || isRawClosed()) {
+      state.sent = true;
+      return;
+    }
     if (beforeSend && ctxRef?.current) {
       const c = ctxRef;
       return (async () => {
         await beforeSend(c.current!);
-        if (state.sent) return;
+        if (state.sent || isRawClosed()) {
+          state.sent = true;
+          return;
+        }
         doStream(readable);
       })();
     }
@@ -301,13 +341,20 @@ function createLegonodeResponse(
       return state.headers;
     },
     setHeader(name: string, value: string | number) {
+      if (isRawClosed() || state.nodeRes.headersSent) {
+        state.sent = true;
+        return;
+      }
       state.headers[name.toLowerCase()] = value;
     },
     send(body: string | Buffer | Uint8Array) {
       return end(body);
     },
     html(body: string) {
-      if (state.sent) return;
+      if (state.sent || isRawClosed()) {
+        state.sent = true;
+        return;
+      }
       state.nodeRes.setHeader("content-type", "text/html; charset=utf-8");
       return end(body);
     },
@@ -315,14 +362,17 @@ function createLegonodeResponse(
       return sendJson(data);
     },
     text(body: string) {
-      if (state.sent) return;
+      if (state.sent || isRawClosed()) {
+        state.sent = true;
+        return;
+      }
       state.nodeRes.setHeader("content-type", "text/plain; charset=utf-8");
       return end(body);
     },
     redirect,
     stream,
     get sent() {
-      return state.sent;
+      return state.sent || isRawClosed();
     },
     get statusCode() {
       return effectiveStatus();
@@ -352,11 +402,21 @@ function parseQuery(search: string): Record<string, string> {
     const eq = search.indexOf("=", start);
     const amp = search.indexOf("&", start);
     const end = amp === -1 ? search.length : amp;
-    const key = decodeURIComponent(search.slice(start, eq === -1 ? end : eq).replace(/\+/g, " "));
+    const keyRaw = search.slice(start, eq === -1 ? end : eq);
+    const key = keyRaw.includes("+")
+      ? decodeURIComponent(keyRaw.replaceAll("+", " "))
+      : keyRaw.includes("%")
+        ? decodeURIComponent(keyRaw)
+        : keyRaw;
     const value =
       eq === -1 || eq >= end
         ? ""
-        : decodeURIComponent(search.slice(eq + 1, end).replace(/\+/g, " "));
+        : (() => {
+            const rawValue = search.slice(eq + 1, end);
+            if (rawValue.includes("+")) return decodeURIComponent(rawValue.replaceAll("+", " "));
+            if (rawValue.includes("%")) return decodeURIComponent(rawValue);
+            return rawValue;
+          })();
     if (key.length) obj[key] = value;
     start = amp === -1 ? search.length : amp + 1;
   }
@@ -399,7 +459,6 @@ function allocContext(
     body: null,
     state: Object.create(null) as Record<string, unknown>,
     emit: () => {},
-    schedule: () => {},
     logger: getNoopLogger(),
     log: { state: [] },
     trace: { get traceId() { return ""; } },

@@ -1,15 +1,32 @@
 import type { ScannedMiddleware } from "../loader/fileScanner.js";
 import { scanMiddlewareFiles } from "../loader/fileScanner.js";
-
-const cache = new Map<string, ScannedMiddleware[]>();
+import { cache } from "../cache/cache.js";
 
 export function getMiddlewareTable(appDir: string): ScannedMiddleware[] {
-  let table = cache.get(appDir);
+  let table = cache.getFromCache("middlewareTableCache", appDir) as
+    | ScannedMiddleware[]
+    | undefined;
   if (!table) {
     table = scanMiddlewareFiles(appDir);
-    cache.set(appDir, table);
+    cache.setInCache("middlewareTableCache", appDir, table);
   }
   return table;
+}
+
+function getPrefixIndex(appDir: string): Map<string, string[]> {
+  let index = cache.getFromCache("middlewarePrefixIndexCache", appDir) as
+    | Map<string, string[]>
+    | undefined;
+  if (index) return index;
+  const table = getMiddlewareTable(appDir);
+  index = new Map<string, string[]>();
+  for (const m of table) {
+    const existing = index.get(m.pathPrefix);
+    if (existing) existing.push(m.filePath);
+    else index.set(m.pathPrefix, [m.filePath]);
+  }
+  cache.setInCache("middlewarePrefixIndexCache", appDir, index);
+  return index;
 }
 
 /** Pathname e.g. /api/hello -> path prefixes ["", "api", "api/hello"] */
@@ -28,18 +45,22 @@ function pathnameToPrefixes(pathname: string): string[] {
 
 /** Ordered list of middleware file paths for this pathname (ancestor first). Uses exact pathPrefix so group middleware (e.g. api/(user)) only runs for routes inside that group. */
 export function getMiddlewarePathsForPathname(pathname: string, appDir: string): string[] {
-  const table = getMiddlewareTable(appDir);
+  const index = getPrefixIndex(appDir);
   const prefixes = pathnameToPrefixes(pathname);
   const paths: string[] = [];
   for (const p of prefixes) {
-    for (const m of table) {
-      if (m.pathPrefix === p) paths.push(m.filePath);
-    }
+    const forPrefix = index.get(p);
+    if (forPrefix) paths.push(...forPrefix);
   }
   return paths;
 }
 
 export function clearMiddlewareTableCache(appDir?: string): void {
-  if (appDir) cache.delete(appDir);
-  else cache.clear();
+  if (appDir) {
+    cache.removeFromCache("middlewareTableCache", appDir);
+    cache.removeFromCache("middlewarePrefixIndexCache", appDir);
+  } else {
+    cache.clearCache("middlewareTableCache");
+    cache.clearCache("middlewarePrefixIndexCache");
+  }
 }

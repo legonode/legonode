@@ -20,26 +20,22 @@ export function compose(
   if (middleware.length === 0) {
     return (ctx: LegonodeContext) => handler(ctx);
   }
-
-  let fn: (ctx: LegonodeContext) => unknown | Promise<unknown> = (ctx: LegonodeContext) =>
-    handler(ctx);
-
-  for (let i = middleware.length - 1; i >= 0; i--) {
-    const mw = middleware[i]!;
-    const next = fn;
-    fn = (ctx: LegonodeContext) =>
-      new Promise((resolve, reject) => {
-        const nextCb = (err?: unknown): Promise<void> => {
-          if (err !== undefined && err !== null) return Promise.reject(err) as Promise<void>;
-          const ret = next(ctx);
-          if (isThenable(ret)) return ret.then(resolve, reject) as Promise<void>;
-          resolve(ret);
-          return Promise.resolve();
-        };
-        const ret = mw(ctx, nextCb);
-        if (isThenable(ret)) (ret as Promise<unknown>).then(() => {}, reject);
+  const len = middleware.length;
+  return (ctx: LegonodeContext): unknown | Promise<unknown> => {
+    let index = -1;
+    const dispatch = (i: number): unknown | Promise<unknown> => {
+      if (i <= index) return Promise.reject(new Error("next() called multiple times"));
+      index = i;
+      if (i === len) return handler(ctx);
+      const mw = middleware[i]!;
+      return mw(ctx, (err?: unknown): Promise<void> => {
+        if (err !== undefined && err !== null) return Promise.reject(err);
+        const nextRet = dispatch(i + 1);
+        return isThenable(nextRet)
+          ? (nextRet as Promise<unknown>).then(() => undefined)
+          : Promise.resolve();
       });
-  }
-
-  return fn;
+    };
+    return dispatch(0);
+  };
 }

@@ -34,6 +34,23 @@ function parsePatternSegments(pathname: string): PatternSegment[] {
   return out;
 }
 
+function tokenizePathname(pathname: string): string[] {
+  const out: string[] = [];
+  const len = pathname.length;
+  let start = pathname.charCodeAt(0) === 47 ? 1 : 0;
+  for (let i = start; i <= len; i++) {
+    if (i === len || pathname.charCodeAt(i) === 47) {
+      if (i > start) out.push(pathname.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
+function decodeIfNeeded(value: string): string {
+  return value.includes("%") ? decodeURIComponent(value) : value;
+}
+
 type RoutePayload = { routeId: string; fileByMethod: Record<string, string> };
 
 type RadixNode = {
@@ -102,7 +119,7 @@ export function buildRadixTree(routes: ScannedRoute[]): RadixTree {
   }
 
   function match(pathname: string): MatchResult | null {
-    const urlSegments = pathname.replace(/^\/+/, "").split("/").filter(Boolean);
+    const urlSegments = tokenizePathname(pathname);
     const params: Record<string, string | string[]> = {};
 
     function walk(n: RadixNode, segIndex: number): MatchResult | null {
@@ -125,14 +142,14 @@ export function buildRadixTree(routes: ScannedRoute[]): RadixTree {
       }
 
       if (n.dynamic) {
-        params[n.dynamic.param] = decodeURIComponent(seg);
+        params[n.dynamic.param] = decodeIfNeeded(seg);
         const result = walk(n.dynamic.node, segIndex + 1);
         if (result) return result;
         delete params[n.dynamic.param];
       }
 
       if (n.catchAll) {
-        params[n.catchAll.param] = urlSegments.slice(segIndex).map(decodeURIComponent);
+        params[n.catchAll.param] = urlSegments.slice(segIndex).map(decodeIfNeeded);
         const result: MatchResult = {
           routeId: n.catchAll.route.routeId,
           fileByMethod: n.catchAll.route.fileByMethod,
@@ -228,7 +245,7 @@ export function buildRadixTreeForMethod(
   }
 
   function match(pathname: string): MatchResultPerMethod | null {
-    const urlSegments = pathname.replace(/^\/+/, "").split("/").filter(Boolean);
+    const urlSegments = tokenizePathname(pathname);
     const params: Record<string, string | string[]> = {};
 
     function walk(n: RadixNodePerMethod, segIndex: number): MatchResultPerMethod | null {
@@ -248,14 +265,14 @@ export function buildRadixTreeForMethod(
       }
 
       if (n.dynamic) {
-        params[n.dynamic.param] = decodeURIComponent(seg);
+        params[n.dynamic.param] = decodeIfNeeded(seg);
         const result = walk(n.dynamic.node, segIndex + 1);
         if (result) return result;
         delete params[n.dynamic.param];
       }
 
       if (n.catchAll) {
-        params[n.catchAll.param] = urlSegments.slice(segIndex).map(decodeURIComponent);
+        params[n.catchAll.param] = urlSegments.slice(segIndex).map(decodeIfNeeded);
         return {
           routeId: n.catchAll.route.routeId,
           filePath: n.catchAll.route.filePath,
