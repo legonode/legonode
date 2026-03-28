@@ -78,17 +78,9 @@ export async function warmRuntime(
 function getOrCreateRuntime(
   options: RequestHandlerOptions,
 ): Runtime | Promise<Runtime> {
-  const cachedByOptions = cache.getFromCache("runtimeByOptions", options) as
-    | Runtime
-    | Promise<Runtime>
-    | undefined;
-  if (cachedByOptions !== undefined) {
-    if (typeof (cachedByOptions as Promise<Runtime>).then === "function")
-      return cachedByOptions as Promise<Runtime>;
-    return cachedByOptions as Runtime;
-  }
   const appDir = options.appDir ?? "./src";
   const key = resolve(appDir);
+  /** Prefer `runtimeCache` so `clearRuntimeCache(appDir)` invalidates the live server (see `runtimeByOptions` WeakMap). */
   const cached = cache.getFromCache("runtimeCache", key) as
     | Runtime
     | Promise<Runtime>

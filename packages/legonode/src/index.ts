@@ -29,10 +29,16 @@ export {
   getOrCreateEventBus,
   clearEventBusCache,
   registerEventHandlersFromApp,
-  scanEventFiles
+  scanEventFiles,
+  isLikelyEventHandlerFilename,
 } from "./events/eventExecutor.js";
 export type { ScannedEvent } from "./events/eventExecutor.js";
-export type { EventContext, EventHandler, EventEmitterFn } from "./events/eventBus.js";
+export type {
+  EventContext,
+  EventEmitSource,
+  EventHandler,
+  EventEmitterFn,
+} from "./events/eventBus.js";
 export type { LegonodeLogger } from "./logger/requestLogger.js";
 export { getBaseLogger, setBaseLogger, createRequestLogger, createPrettyLogger, getNoopLogger } from "./logger/requestLogger.js";
 export type { TraceData, TraceStartData, TracerFn, TraceStartFn, TraceSpan } from "./trace/traceEngine.js";

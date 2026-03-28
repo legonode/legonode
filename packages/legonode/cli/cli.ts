@@ -42,16 +42,28 @@ program
 
 program
   .command("create [name]")
-  .description("Create a new Legonode project")
+  .description("Create a new Legonode project (local scaffold, or clone a template via -t)")
+  .option(
+    "-t, --template <value>",
+    "Template: built-in name (e.g. basic) or git URL / github.com/.../tree/branch/path",
+  )
   .option("--no-install", "Skip npm/bun install")
-  .action(async (name: string | undefined, cmd?: { opts: () => { install?: boolean } }) => {
-    const opts = cmd?.opts?.() ?? {};
-    const runOpts: { name?: string; noInstall: boolean } = {
-      noInstall: opts.install === false,
-    };
-    if (name !== undefined) runOpts.name = name;
-    await createCommand.run(runOpts);
-  });
+  .action(
+    async (
+      name: string | undefined,
+      cmd?: { opts: () => { install?: boolean; template?: string } },
+    ) => {
+      const opts = cmd?.opts?.() ?? {};
+      const runOpts: { name?: string; noInstall: boolean; template?: string } = {
+        noInstall: opts.install === false,
+      };
+      if (name !== undefined) runOpts.name = name;
+      if (opts.template !== undefined && opts.template !== "") {
+        runOpts.template = opts.template;
+      }
+      await createCommand.run(runOpts);
+    },
+  );
 
 program
   .command("start")

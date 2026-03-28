@@ -8,7 +8,10 @@ import { validateApp } from "../../src/validation/validateApp.js";
 import { clearPipelineCache } from "../../src/pipeline/pipelineCache.js";
 import { clearMiddlewareTableCache } from "../../src/middleware/middlewareTable.js";
 import { clearMiddlewareResolverCache } from "../../src/middleware/middlewareResolver.js";
-import { clearEventBusCache } from "../../src/events/eventExecutor.js";
+import {
+  clearEventBusCache,
+  isLikelyEventHandlerFilename,
+} from "../../src/events/eventExecutor.js";
 import { clearRouteSecurityConfigCache } from "../../src/security/securityConfigLoader.js";
 import { reloadRoutes } from "../../src/router/routeLoader.js";
 import { runPluginHook } from "../pluginHooks.js";
@@ -278,12 +281,9 @@ function getFileTypeForReload(
     return "middleware";
   } else if (/security\.(ts|js|mts|mjs)$/.test(filename)) {
     return "security";
-  } else if (
-    filename.startsWith("events/") &&
-    /\.event\.(ts|js|mts|mjs)$/.test(filename)
-  ) {
+  } else if (isLikelyEventHandlerFilename(filename)) {
     return "event";
-  }else if(filename.startsWith("plugins/")){
+  } else if (filename.startsWith("plugins/") || filename.includes("plugins/")) {
     return "plugin";
   }
   return "other";

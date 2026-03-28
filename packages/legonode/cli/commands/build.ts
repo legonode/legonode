@@ -1,9 +1,10 @@
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { loadConfig, getAppDir, getBuildPath } from "../../src/config/loadConfig.js";
 import { scanAppFiles } from "../../src/loader/fileScanner.js";
 import { validateApp } from "../../src/validation/validateApp.js";
+import { scanEventFiles } from "../../src/events/eventExecutor.js";
 import { runPluginHook } from "../pluginHooks.js";
 import { appLogger } from "../../src/utils/logger.js";
 
@@ -57,18 +58,8 @@ runServer(opts).catch((err) => {
   appLogger.info("  server.js written to " + serverPath);
 }
 
-const EVENT_EXTENSIONS = [".event.ts", ".event.js", ".event.mts", ".event.mjs"];
-
 function countEventFiles(appDir: string): number {
-  try {
-    const eventsDir = join(resolve(appDir), "events");
-    const entries = readdirSync(eventsDir, { withFileTypes: true });
-    return entries.filter(
-      (e) => e.isFile() && EVENT_EXTENSIONS.some((ext) => e.name.endsWith(ext))
-    ).length;
-  } catch {
-    return 0;
-  }
+  return scanEventFiles(appDir).length;
 }
 
 export type BuildOptions = {
