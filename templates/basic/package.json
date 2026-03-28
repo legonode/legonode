@@ -1,0 +1,17 @@
+{
+  "name": "basic",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "legonode dev",
+    "build": "legonode build",
+    "start": "legonode start"
+  },
+  "dependencies": {
+    "legonode": "^0.0.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
