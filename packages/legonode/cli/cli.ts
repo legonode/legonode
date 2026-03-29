@@ -16,6 +16,7 @@ import { devCommand } from "./commands/dev.js";
 import { buildCommand } from "./commands/build.js";
 import { startCommand } from "./commands/start.js";
 import { createCommand } from "./commands/create.js";
+import { addCommand } from "./commands/add.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version?: string };
@@ -73,4 +74,27 @@ program
   .option("--build-path <path>", "Built app directory (overrides config)")
   .action((opts) => startCommand.run(opts));
 
-program.parse(process.argv);
+program
+  .command("add")
+  .description("Install a Legonode plugin package and run its setup script when available")
+  .requiredOption("-p, --plugin <name>", "npm package name (e.g. @legonode/prisma)")
+  .option(
+    "--skip-install",
+    "Skip installing the plugin with the package manager; setup still runs (e.g. prisma init for @legonode/prisma)",
+  )
+  .action(async (opts: { plugin: string; skipInstall?: boolean }) => {
+    await addCommand.run({
+      plugin: opts.plugin,
+      cwd: process.cwd(),
+      noInstall: opts.skipInstall === true,
+    });
+  });
+
+async function main() {
+  await program.parseAsync(process.argv);
+}
+
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

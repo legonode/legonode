@@ -80,23 +80,21 @@ export async function loadConfig(cwd: string): Promise<LegonodeConfig> {
   return {};
 }
 
-export function getAppDir(config: LegonodeConfig, cwd: string): string|undefined {
+export function getAppDir(config: LegonodeConfig, cwd: string): string | undefined {
   // Default app directory layout:
   // - routes live under `${appDir}/router/**`
   // - other runtime features (events/middleware/etc.) use `${appDir}`
   try {
-    const appDir = config.appDir ?? "./src";
-    const routerDir = resolve(appDir);
+    const raw = config.appDir ?? "./src";
+    const routerDir = raw.startsWith("/") ? raw : resolve(cwd, raw);
     if (existsSync(routerDir)) {
       return routerDir;
     }
     throw new Error();
-  } catch(error) {
+  } catch {
     appLogger.error("App directory not found: ", config.appDir);
     return;
   }
-  // const raw = config.appDir ?? "./src";
-  // return raw.startsWith("/") ? raw : resolve(cwd, raw);
 }
 
 export function getBuildPath(config: LegonodeConfig, cwd: string): string {

@@ -13,6 +13,7 @@ export type {
 export type { Next, Middleware } from "./middleware/middlewareRunner.js";
 export { NextError } from "./middleware/middlewareRunner.js";
 export type { CorsConfig, ErrorHandler, LegonodeConfig } from "./config/loadConfig.js";
+export { loadConfig, getAppDir, getBuildPath } from "./config/loadConfig.js";
 export type {
   LegonodePlugin,
   LegonodeInitContext,
@@ -55,3 +56,13 @@ export type {
   TimeoutConfig,
   CompiledSecurity,
 } from "./security/index.js";
+export {
+  addPluginToLegonodeConfig,
+  type AddPluginToLegonodeConfigInput,
+  type AddPluginToLegonodeConfigResult,
+  type LegonodeConfigImportSpec,
+} from "./setup/addPluginToLegonodeConfig.js";
+export type {
+  LegonodePluginSetupContext,
+  LegonodePluginSetupFn,
+} from "./setup/pluginSetupTypes.js";
