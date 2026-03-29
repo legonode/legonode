@@ -1,6 +1,6 @@
 {
   "name": "@legonode/cron",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Cron schedules, loader, and runner for Legonode apps (app/cron/*.cron.ts)",
   "type": "module",
   "sideEffects": false,
@@ -22,9 +22,9 @@
   },
   "types": "./dist/index.d.ts",
   "peerDependencies": {
-    "legonode": ">=0.0.5"
+    "legonode": ">=0.0.6"
   },
   "devDependencies": {
-    "legonode": "^0.0.5"
+    "legonode": "^0.0.6"
   }
 }

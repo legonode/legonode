@@ -6,6 +6,7 @@ import {
   loadSchedulesFromApp,
 } from "./scheduleLoader.js";
 import { runScheduler } from "./runScheduler.js";
+import { CRON_EXTENSIONS } from "./scheduleLoader.js";
 
 export type CronPluginOptions = {
   /** Disable scheduler in `disableDevCron` command (default: false). */
@@ -47,8 +48,11 @@ function parseAtMs(at: NonNullable<ScheduleWhenOptions["at"]>): number | null {
 function isCronFile(filename?: string): boolean {
   if (!filename) return false;
   const normalized = filename.replaceAll("\\", "/");
-  // Bun/Node watch commonly reports paths like "src/cron/x.cron.ts", not "cron/x.cron.ts".
-  return normalized.includes("/cron/") && /\.cron\.(ts|js|mts|mjs)$/i.test(normalized);
+  if (normalized.endsWith(".d.ts")) return false;
+  const underCron =
+    normalized.startsWith("cron/") || normalized.includes("/cron/");
+  if (!underCron) return false;
+  return CRON_EXTENSIONS.some((ext) => normalized.endsWith(ext))
 }
 
 export function Cron(options: CronPluginOptions = {}): LegonodePlugin {
