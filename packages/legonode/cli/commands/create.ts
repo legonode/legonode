@@ -284,7 +284,7 @@ const PACKAGE_JSON = (name: string) => `{
     "start": "legonode start"
   },
   "dependencies": {
-    "legonode": "^0.0.6"
+    "legonode": "^0.0.9"
   },
   "devDependencies": {
     "typescript": "^5.9.0"
@@ -302,7 +302,10 @@ const TSCONFIG_JSON = `{
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src/**/*", "legonode.config.ts"]
 }

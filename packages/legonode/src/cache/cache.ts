@@ -16,6 +16,7 @@ export type TurboPlan = {
   middlewarePath: string;
   route: ResolvedRoute["route"];
   middleware: Middleware[];
+  rawBody: boolean;
   mergedResponseSchema: ResponseSchemaMap | undefined;
   defaultStatus: number;
   pipeline: (ctx: LegonodeContext) => unknown | Promise<unknown>;

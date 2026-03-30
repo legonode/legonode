@@ -2,7 +2,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Readable } from "node:stream";
 
 import type { TraceSpan } from "../trace/traceEngine.js";
-import type { RequestLogEntry, LegonodeLogger } from "../logger/requestLogger.js";
+import type {
+  RequestLogEntry,
+  LegonodeLogger,
+} from "../logger/requestLogger.js";
 
 /** Exposed on ctx.trace so the user can get the request trace id (e.g. for logging). */
 export type TraceRef = { readonly traceId: string };
@@ -57,7 +60,11 @@ export type LegonodeResponse = {
   /** True if response was already sent (e.g. via res.json()) */
   readonly sent: boolean;
   /** @internal Reuse for another request when using context pool. */
-  reinit?: (nodeRes: ServerResponse, defaultStatusRef: DefaultStatusRef, responseSizeRef?: { current: number }) => void;
+  reinit?: (
+    nodeRes: ServerResponse,
+    defaultStatusRef: DefaultStatusRef,
+    responseSizeRef?: { current: number },
+  ) => void;
 };
 
 export interface LegonodeContext {
@@ -112,7 +119,10 @@ export type LegonodeResponseTyped<T extends ResponseBodyByStatus> = Omit<
 };
 
 /** Context with res.json() typed by status from response schema. */
-export type ContextWithResponses<T extends ResponseBodyByStatus> = Omit<LegonodeContext, "res"> & {
+export type ContextWithResponses<T extends ResponseBodyByStatus> = Omit<
+  LegonodeContext,
+  "res"
+> & {
   res: LegonodeResponseTyped<T>;
 };
 
@@ -124,14 +134,26 @@ export type ContextWithResponses<T extends ResponseBodyByStatus> = Omit<Legonode
  * type Res = InferResponseBodies<typeof RESPONSE_SCHEMA>;
  * export default async function GET(ctx: Context<Res>) { ctx.res.status(200).json([...]); }
  */
-export type Context<T extends ResponseBodyByStatus = never> = [T] extends [never]
+export type Context<T extends ResponseBodyByStatus = never> = [T] extends [
+  never,
+]
   ? Omit<
       LegonodeContext,
-      "__traceSpan" | "__responseSchemaRef" | "__defaultStatusRef" | "__responseSizeRef"
+      | "__traceSpan"
+      | "__responseSchemaRef"
+      | "__defaultStatusRef"
+      | "__responseSizeRef"
+      | "__ctxRef"
+      | "__queryCache"
     >
   : Omit<
       ContextWithResponses<T>,
-      "__traceSpan" | "__responseSchemaRef" | "__defaultStatusRef" | "__responseSizeRef"
+      | "__traceSpan"
+      | "__responseSchemaRef"
+      | "__defaultStatusRef"
+      | "__responseSizeRef"
+      | "__ctxRef"
+      | "__queryCache"
     >;
 
 export type ResponseSchemaRef = { current?: ResponseSchemaMap };
@@ -139,7 +161,9 @@ export type ResponseSchemaRef = { current?: ResponseSchemaMap };
 export type DefaultStatusRef = { current: number };
 
 /** Pick default status when handler does not call res.status(): prefer 200, then 201, then 204; else 200. */
-export function getDefaultStatusFromSchema(schema: ResponseSchemaMap | undefined): number {
+export function getDefaultStatusFromSchema(
+  schema: ResponseSchemaMap | undefined,
+): number {
   if (!schema || typeof schema !== "object") return 200;
   const keys = Object.keys(schema)
     .map(Number)
@@ -168,7 +192,7 @@ function createLegonodeResponse(
   defaultStatusRef: DefaultStatusRef,
   responseSizeRef?: { current: number },
   beforeSend?: BeforeSendFn,
-  ctxRef?: { current: LegonodeContext | null }
+  ctxRef?: { current: LegonodeContext | null },
 ): LegonodeResponse {
   const state: ResponseState = {
     nodeRes,
@@ -201,12 +225,24 @@ function createLegonodeResponse(
     state.sent = true;
     if (state.responseSizeRef) {
       state.responseSizeRef.current =
-        body === undefined ? 0 : Buffer.isBuffer(body) ? body.length : typeof body === "string" ? Buffer.byteLength(body) : body.length;
+        body === undefined
+          ? 0
+          : Buffer.isBuffer(body)
+            ? body.length
+            : typeof body === "string"
+              ? Buffer.byteLength(body)
+              : body.length;
     }
     state.nodeRes.statusCode = effectiveStatus();
     applyHeaders();
     if (body !== undefined) {
-      state.nodeRes.end(Buffer.isBuffer(body) ? body : typeof body === "string" ? body : Buffer.from(body));
+      state.nodeRes.end(
+        Buffer.isBuffer(body)
+          ? body
+          : typeof body === "string"
+            ? body
+            : Buffer.from(body),
+      );
     } else {
       state.nodeRes.end();
     }
@@ -262,7 +298,7 @@ function createLegonodeResponse(
       }
       state.nodeRes.setHeader("content-type", "text/html; charset=utf-8");
       return end(body);
-    }
+    },
   };
 
   function doRedirect(url: string, code: number): void {
@@ -384,7 +420,7 @@ function createLegonodeResponse(
       state.sent = false;
       state.explicitStatus = null;
       for (const k of Object.keys(state.headers)) delete state.headers[k];
-    }
+    },
   };
 
   return res;
@@ -413,7 +449,8 @@ function parseQuery(search: string): Record<string, string> {
         ? ""
         : (() => {
             const rawValue = search.slice(eq + 1, end);
-            if (rawValue.includes("+")) return decodeURIComponent(rawValue.replaceAll("+", " "));
+            if (rawValue.includes("+"))
+              return decodeURIComponent(rawValue.replaceAll("+", " "));
             if (rawValue.includes("%")) return decodeURIComponent(rawValue);
             return rawValue;
           })();
@@ -433,7 +470,7 @@ function parseQueryFromReq(req: IncomingMessage): Record<string, string> {
 function allocContext(
   req: IncomingMessage,
   res: ServerResponse,
-  beforeSend?: BeforeSendFn
+  beforeSend?: BeforeSendFn,
 ): LegonodeContext {
   const responseSchemaRef: ResponseSchemaRef = {};
   const defaultStatusRef: DefaultStatusRef = { current: 200 };
@@ -442,7 +479,13 @@ function allocContext(
 
   const ctx: LegonodeContext = {
     req,
-    res: createLegonodeResponse(res, defaultStatusRef, responseSizeRef, beforeSend, ctxRef),
+    res: createLegonodeResponse(
+      res,
+      defaultStatusRef,
+      responseSizeRef,
+      beforeSend,
+      ctxRef,
+    ),
     __responseSchemaRef: responseSchemaRef,
     __defaultStatusRef: defaultStatusRef,
     __responseSizeRef: responseSizeRef,
@@ -461,7 +504,11 @@ function allocContext(
     emit: () => {},
     logger: getNoopLogger(),
     log: { state: [] },
-    trace: { get traceId() { return ""; } },
+    trace: {
+      get traceId() {
+        return "";
+      },
+    },
     __ctxRef: ctxRef,
   };
   ctxRef.current = ctx;
@@ -472,7 +519,7 @@ function reinitContext(
   ctx: LegonodeContext,
   req: IncomingMessage,
   res: ServerResponse,
-  beforeSend?: BeforeSendFn
+  beforeSend?: BeforeSendFn,
 ): LegonodeContext {
   const defaultStatusRef = ctx.__defaultStatusRef!;
   const responseSizeRef = ctx.__responseSizeRef!;
@@ -484,7 +531,13 @@ function reinitContext(
     ctx.res.reinit(res, defaultStatusRef, responseSizeRef);
   } else {
     const ctxRef = ctx.__ctxRef ?? { current: ctx };
-    ctx.res = createLegonodeResponse(res, defaultStatusRef, responseSizeRef, beforeSend, ctxRef);
+    ctx.res = createLegonodeResponse(
+      res,
+      defaultStatusRef,
+      responseSizeRef,
+      beforeSend,
+      ctxRef,
+    );
   }
   ctx.params = Object.create(null) as Record<string, string | string[]>;
   ctx.body = null;
@@ -499,7 +552,7 @@ export function getContext(
   req: IncomingMessage,
   res: ServerResponse,
   usePool = false,
-  beforeSend?: BeforeSendFn
+  beforeSend?: BeforeSendFn,
 ): LegonodeContext {
   if (!usePool) return allocContext(req, res, beforeSend);
   const recycled = ctxPool.pop();
@@ -520,4 +573,3 @@ export function releaseContext(ctx: LegonodeContext): void {
 
 /** Get a request context (from pool when possible). Same as getContext; exported for backwards compatibility. */
 export const createContext = getContext;
-

@@ -439,6 +439,30 @@ export async function handleNodeRequest(
   const tracingEnabled = runtime.tracing === true;
   const ctx = runtime.createRequestContext(req, res);
   const handleRequest = async () => {
+  let matchedRouteId: string | null = null;
+  let pathnameForMiddleware = pathname;
+  let middleware: Middleware[] = [];
+  let route: ResolvedRoute | null = null;
+  let pipeline: ((ctx: LegonodeContext) => unknown | Promise<unknown>) | null = null;
+  let skipBodyParsing = false;
+
+  const turboKey = turboCacheKey(appDir, method, pathname);
+  const cachedPlan = cache.getFromCache("turboPlanCache", turboKey) as TurboPlan | undefined;
+  if (cachedPlan) {
+    skipBodyParsing = cachedPlan.rawBody === true;
+    matchedRouteId = cachedPlan.routeId;
+    pathnameForMiddleware = cachedPlan.middlewarePath;
+    middleware = cachedPlan.middleware;
+    pipeline = cachedPlan.pipeline;
+    if (ctx.__responseSchemaRef && cachedPlan.mergedResponseSchema !== undefined)
+      ctx.__responseSchemaRef.current = cachedPlan.mergedResponseSchema;
+    if (ctx.__defaultStatusRef) ctx.__defaultStatusRef.current = cachedPlan.defaultStatus;
+  } else if (method !== "GET" && method !== "HEAD") {
+    const preRoute = await resolveRoute(method, pathname, appDir);
+    if (preRoute?.route?.rawBody === true) skipBodyParsing = true;
+    route = preRoute as ResolvedRoute | null;
+  }
+
   let effectiveSecurity = COMPILED_SECURITY_EMPTY;
   if (hasAnySecurityFiles(appDir)) {
     const routeSecurity = await resolveRouteSecurityConfig(appDir, pathname, method);
@@ -447,6 +471,9 @@ export async function handleNodeRequest(
   if (!applySecurityGuards(effectiveSecurity, ctx, method)) return;
 
   if (method === "GET" || method === "HEAD") {
+    ctx.body = null;
+  } else if (skipBodyParsing) {
+    // Keep raw stream intact for route handlers that need direct access (e.g. Better Auth).
     ctx.body = null;
   } else {
     const maxBodySize = effectiveSecurity.requestSize.enabled
@@ -495,32 +522,16 @@ export async function handleNodeRequest(
 
   ctx.__traceSpan?.start({ method, pathname });
 
-  let matchedRouteId: string | null = null;
-  let pathnameForMiddleware = pathname;
-  let middleware: Middleware[] = [];
-  let route: ResolvedRoute | null = null;
-  let pipeline: ((ctx: LegonodeContext) => unknown | Promise<unknown>) | null = null;
-
-  const turboKey = turboCacheKey(appDir, method, pathname);
-  const cachedPlan = cache.getFromCache("turboPlanCache", turboKey) as TurboPlan | undefined;
-  if (cachedPlan) {
-    matchedRouteId = cachedPlan.routeId;
-    pathnameForMiddleware = cachedPlan.middlewarePath;
-    middleware = cachedPlan.middleware;
-    pipeline = cachedPlan.pipeline;
-    if (ctx.__responseSchemaRef && cachedPlan.mergedResponseSchema !== undefined)
-      ctx.__responseSchemaRef.current = cachedPlan.mergedResponseSchema;
-    if (ctx.__defaultStatusRef) ctx.__defaultStatusRef.current = cachedPlan.defaultStatus;
-  }
-
   if (!pipeline) {
-    const routeResult = resolveRoute(method, pathname, appDir);
-    route = (
-      routeResult != null &&
-      typeof (routeResult as Promise<unknown>).then === "function"
-        ? await routeResult
-        : routeResult
-    ) as ResolvedRoute | null;
+    if (!route) {
+      const routeResult = resolveRoute(method, pathname, appDir);
+      route = (
+        routeResult != null &&
+        typeof (routeResult as Promise<unknown>).then === "function"
+          ? await routeResult
+          : routeResult
+      ) as ResolvedRoute | null;
+    }
     matchedRouteId =
       route != null
         ? (route.route?.routeId ??
@@ -569,6 +580,7 @@ export async function handleNodeRequest(
         middlewarePath: pathnameForMiddleware,
         route: route.route,
         middleware,
+        rawBody: route.route.rawBody === true,
         mergedResponseSchema,
         defaultStatus,
         pipeline,

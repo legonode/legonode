@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { networkInterfaces } from "node:os";
 
 import {
   handleNodeRequest,
@@ -19,6 +20,29 @@ export type NodeServerOptions = RequestHandlerOptions & {
   onListen?: (info: { port: number; hostname: string }) => void;
   appDir?: string;
 };
+
+function getLanAddress(): string | null {
+  const nets = networkInterfaces();
+  for (const entries of Object.values(nets)) {
+    if (!entries) continue;
+    for (const info of entries) {
+      if (info.family === "IPv4" && !info.internal) return info.address;
+    }
+  }
+  return null;
+}
+
+function getLocalUrl(hostname: string, port: number): string {
+  if (
+    hostname === "0.0.0.0" ||
+    hostname === "::" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  ) {
+    return `http://localhost:${port}`;
+  }
+  return `http://${hostname}:${port}`;
+}
 
 
 export function createNodeServer(options: NodeServerOptions = {}) {
@@ -91,7 +115,11 @@ export function setupServer(
       port,
       hostname: host,
       onListen: ({ hostname, port: p }) => {
-        appLogger.info(`legonode dev listening on http://${hostname}:${p}`);
+        const local = getLocalUrl(hostname, p);
+        const lan = getLanAddress();
+        const lines = [`- Local:         ${local}`];
+        if (lan) lines.push(`- Network:       http://${lan}:${p}`);
+        appLogger.info(lines.join("\n"));
       },
     });
   } catch (error: any) {

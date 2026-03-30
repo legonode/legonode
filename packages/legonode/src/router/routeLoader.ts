@@ -52,6 +52,8 @@ export type LoadedRoute = {
   schema?: RouteSchema;
   methodSchema?: RouteSchema;
   responseSchema?: ResponseSchemaMap;
+  /** Skip framework body parsing for this route and pass raw req stream to handler. */
+  rawBody?: boolean;
 };
 
 export async function loadRoute(
@@ -78,6 +80,7 @@ export async function loadRoute(
         responseSchema: (mod[`${method}_RESPONSE_SCHEMA`] ??
           mod.RESPONSE_SCHEMA) as ResponseSchemaMap,
       }),
+      ...((mod[`${method}_RAW_BODY`] ?? mod.RAW_BODY) === true && { rawBody: true }),
     };
   } catch (err) {
     appLogger.error("[legonode] loadRoute error:", err);

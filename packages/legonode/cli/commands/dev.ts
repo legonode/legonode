@@ -2,7 +2,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { watch, type FSWatcher, existsSync } from "node:fs";
 import { createNodeServer, setupServer } from "../../src/server/server.js";
-import { clearRuntimeCache, clearTurboPlanCache } from "../../src/server/requestHandler.js";
+import {
+  clearRuntimeCache,
+  clearTurboPlanCache,
+} from "../../src/server/requestHandler.js";
 import { loadConfig, getAppDir } from "../../src/config/loadConfig.js";
 import { validateApp } from "../../src/validation/validateApp.js";
 import { clearPipelineCache } from "../../src/pipeline/pipelineCache.js";
@@ -25,10 +28,15 @@ export type DevOptions = {
 };
 
 const WATCH_FILES_EXTENSIONS = [".ts", ".js", ".mts", ".mjs", ".json"];
-const WATCH_FILES_EXTENSIONS_REGEX = new RegExp(`(${WATCH_FILES_EXTENSIONS.join("|")})$`);
+const WATCH_FILES_EXTENSIONS_REGEX = new RegExp(
+  `(${WATCH_FILES_EXTENSIONS.join("|")})$`,
+);
 
 function isWatchFile(filename: string): "watch" | "incomingMessage" | "other" {
-  if (WATCH_FILES_EXTENSIONS_REGEX.test(filename) && !filename.startsWith(".legonode")) {
+  if (
+    WATCH_FILES_EXTENSIONS_REGEX.test(filename) &&
+    !filename.startsWith(".legonode")
+  ) {
     return "watch";
   } else {
     return "other";
@@ -115,7 +123,7 @@ async function run(opts: DevOptions = {}) {
         if (!filename || isWatchFile(filename) === "other") return;
         const currentDir = appDirRef.current;
         const changedPath = resolve(cwd, filename);
-        
+
         const fileType = getFileTypeForReload(filename);
 
         const fileExists = existsSync(changedPath);
@@ -143,9 +151,12 @@ async function run(opts: DevOptions = {}) {
           appLogger.info(`[legonode] reload: events (${filename})`);
         } else if (fileType === "plugin") {
           restartCommand({ reason: "plugin-change" });
-        }
-        else{
-          appLogger.info(`[legonode] reload: Changes Detected in (${filename})`);
+        } else {
+          appLogger.info(
+            `[legonode] reload: Changes Detected in (${filename})`,
+          );
+          restartCommand();
+          return;
         }
 
         await runPluginHook(plugins, "onDevFileChange", {
@@ -189,7 +200,7 @@ async function run(opts: DevOptions = {}) {
     if (lastRestartTime && Date.now() - lastRestartTime < CONFIG_COOLDOWN_MS)
       return;
     if (restartTimeout) clearTimeout(restartTimeout);
-    const restartReason = opts.reason ?? "config-change";
+    const restartReason = opts.reason ?? "";
     restartTimeout = setTimeout(async () => {
       restartTimeout = null;
       if (restartInProgress) return;
@@ -210,7 +221,9 @@ async function run(opts: DevOptions = {}) {
         appLogger.info(
           restartReason === "plugin-change"
             ? "[legonode] plugins changed, restarting..."
-            : "[legonode] config changed, restarting...",
+            : restartReason === "config-change"
+              ? "[legonode] config changed, restarting..."
+              : "[legonode] changes detected, restarting...",
         );
         await runPluginHook(plugins, "onDevRestart", {
           command: "dev",
@@ -265,7 +278,6 @@ async function run(opts: DevOptions = {}) {
   }
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-
 }
 
 function getFileTypeForReload(
