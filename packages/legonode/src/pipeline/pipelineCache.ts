@@ -56,10 +56,11 @@ export function getOrCreatePipeline(
   if (fn) return fn;
   const mergedSchema = mergeRouteSchema(route.schema, route.methodSchema);
   const hasValidation = !!(mergedSchema.body ?? mergedSchema.params ?? mergedSchema.query);
+  const handler = (ctx: LegonodeContext) => route.handler(ctx);
   const mwList = hasValidation
     ? [createValidationMiddleware(mergedSchema, method), ...middleware]
     : middleware.length > 0 ? middleware : [];
-  const composed = compose(mwList, (ctx) => route.handler(ctx));
+  const composed = compose(mwList, handler);
   fn = (ctx: LegonodeContext): unknown | Promise<unknown> => {
     try {
       return composed(ctx);

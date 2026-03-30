@@ -24,3 +24,6 @@ export function compileSecurity(config?: SecurityConfig): CompiledSecurity {
   };
 }
 
+/** Reused when a route has no security config (avoids allocating a new object every request). */
+export const COMPILED_SECURITY_EMPTY: CompiledSecurity = compileSecurity(undefined);
+

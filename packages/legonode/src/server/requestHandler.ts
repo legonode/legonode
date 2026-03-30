@@ -53,8 +53,14 @@ import { appLogger } from "../utils/logger.js";
 import { defaultErrorHandler } from "./errorHandler.js";
 import { cache, type TurboPlan } from "../cache/cache.js";
 import { applySecurityGuards } from "../security/middleware.js";
-import { compileSecurity } from "../security/compileSecurity.js";
-import { resolveRouteSecurityConfig } from "../security/securityConfigLoader.js";
+import {
+  compileSecurity,
+  COMPILED_SECURITY_EMPTY,
+} from "../security/compileSecurity.js";
+import {
+  hasAnySecurityFiles,
+  resolveRouteSecurityConfig,
+} from "../security/securityConfigLoader.js";
 
 export function clearRuntimeCache(appDir?: string): void {
   if (appDir !== undefined) {
@@ -332,14 +338,21 @@ function turboCacheKey(appDir: string, method: string, pathname: string): string
 }
 
 function isHelloWorld(obj: unknown): boolean {
-  return (
-    obj != null &&
-    typeof obj === "object" &&
-    !Array.isArray(obj) &&
-    "hello" in obj &&
-    (obj as { hello: unknown }).hello === "world" &&
-    Object.keys(obj as object).length === 1
-  );
+  if (obj === null || obj === undefined) return false;
+  if (typeof obj !== "object") return false;
+  if (Array.isArray(obj)) return false;
+  const o = obj as { hello?: unknown };
+  if (o.hello !== "world") return false;
+  // Fast check: ensure there is exactly one own enumerable key (`hello`).
+  let count = 0;
+  const hasOwn = Object.prototype.hasOwnProperty;
+  // eslint-disable-next-line guard-for-in
+  for (const k in o) {
+    if (!hasOwn.call(o, k)) continue;
+    count += 1;
+    if (count > 1) return false;
+  }
+  return count === 1;
 }
 
 function sendFrameworkResponse(
@@ -355,14 +368,18 @@ function sendFrameworkResponse(
   res.statusCode = status;
 
   if (extraHeaders) {
-    for (const [k, v] of Object.entries(extraHeaders))
-      res.setHeader(k, String(v));
+    // Avoid Object.entries allocation in the hot path.
+    for (const k in extraHeaders) res.setHeader(k, String(extraHeaders[k]!));
   }
-  const headers = response.headers ?? {};
-  for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+  const headers = response.headers;
+  if (headers) {
+    // Avoid Object.entries allocation in the hot path.
+    for (const k in headers) res.setHeader(k, headers[k]!);
+  }
 
   if ("json" in response) {
-    if (!res.getHeader("content-type"))
+    // Avoid res.getHeader() allocation/lookup work when not needed.
+    if (!res.hasHeader("content-type"))
       res.setHeader("content-type", "application/json; charset=utf-8");
     if (status === 200 && isHelloWorld(response.json)) {
       res.end(HELLO_WORLD_JSON);
@@ -421,9 +438,12 @@ export async function handleNodeRequest(
       : (runtimeOrPromise as Runtime);
   const tracingEnabled = runtime.tracing === true;
   const ctx = runtime.createRequestContext(req, res);
-
-  const routeSecurity = await resolveRouteSecurityConfig(appDir, pathname, method);
-  const effectiveSecurity = compileSecurity(routeSecurity);
+  const handleRequest = async () => {
+  let effectiveSecurity = COMPILED_SECURITY_EMPTY;
+  if (hasAnySecurityFiles(appDir)) {
+    const routeSecurity = await resolveRouteSecurityConfig(appDir, pathname, method);
+    if (routeSecurity !== undefined) effectiveSecurity = compileSecurity(routeSecurity);
+  }
   if (!applySecurityGuards(effectiveSecurity, ctx, method)) return;
 
   if (method === "GET" || method === "HEAD") {
@@ -696,4 +716,7 @@ export async function handleNodeRequest(
     if (runtime.hasPlugins) await runtime.runHook("afterResponse", ctx);
     if (runtime.contextPool) releaseContext(ctx);
   }
+  };
+
+  await handleRequest();
 }

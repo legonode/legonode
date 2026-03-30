@@ -84,6 +84,11 @@ function scanSecurityFiles(appDir: string): ScannedSecurity[] {
   return list;
 }
 
+/** Fast check used by the request hot path to skip security resolution entirely when none exist. */
+export function hasAnySecurityFiles(appDir: string): boolean {
+  return scanSecurityFiles(appDir).length > 0;
+}
+
 async function loadSecurityModule(filePath: string, method: string): Promise<SecurityConfig | undefined> {
   try {
     const bust = process.env.LEGONODE_SECURITY_RELOAD_TOKEN;
